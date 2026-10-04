@@ -13,6 +13,9 @@ ps5-obj/
 # Host-test sandboxes, fixtures, backups and screenshots. Never publish: the
 # backups alone are tens of MB and they contain point-in-time copies of src/.
 .build/
+# Whitelist: the front-end acceptance harness (vm-level checks pinned to
+# assets/index.html) is a real deliverable, not scratch.
+!.build/dock_pkg_checks.mjs
 
 # ---- pre-rename artifacts -----------------------------------------------
 # Kept listed so an old binary lying around cannot be mistaken for a fresh
