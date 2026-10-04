@@ -1,0 +1,82 @@
+Third-party components in PS5 Nexus
+===================================
+
+This project is GPL-3.0-or-later (see LICENSE). It builds on, and in some cases
+redistributes, the following third-party work. Nothing here is claimed as
+original, and no licence is re-granted.
+
+PS5 Nexus is derived from owendswang/ps5-web-file-manager
+---------------------------------------------------------
+The back end (src/) descends from that project, which is distributed under the
+GNU General Public License v3.0. That is why this project is GPL-3.0-or-later.
+https://github.com/owendswang/ps5-web-file-manager
+
+
+Vendored source: third_party/
+-----------------------------
+
+libsmb2 — SMB2/3 client
+  Vendored:  third_party/libsmb2/{lib,include}
+  Licence:   LGPL-2.1-or-later
+  Texts:     third_party/libsmb2/LICENCE-LGPL-2.1.txt, third_party/libsmb2/COPYING
+  Upstream:  https://github.com/sahlberg/libsmb2
+  MODIFIED:  locally patched. The vendored copy carries a fix for a
+             use-after-free in opendir()'s error path (upstream's
+             dir->free_cb_data ownership flag plus a cross-file
+             smb2_dir_take_cb_data() helper, declared in
+             include/libsmb2-private.h). The library's own sources and licence
+             are otherwise unchanged.
+  Note:      upstream splits this repository by licence; only the LGPL-2.1+
+             library directories are vendored. The BSD-licensed examples/ tree
+             is NOT included.
+
+libnfs — NFSv3/v4 client
+  Vendored:  third_party/libnfs/{lib,include,mount,nfs,nfs4,nlm,nsm,portmap,rquota}
+  Licence:   LGPL-2.1-or-later (library sources and include directories), and
+             Simplified BSD for the protocol definitions and the files generated
+             from them — the */libnfs-raw-<protocol>.[ch] pairs.
+  Texts:     third_party/libnfs/LICENCE-LGPL-2.1.txt, third_party/libnfs/LICENCE-BSD.txt
+  Upstream:  https://github.com/sahlberg/libnfs
+  Note:      upstream splits this repository by licence; the GPL-3.0
+             examples/ tree is NOT vendored, so no GPL-3-only code is pulled in
+             beyond what this project already carries as a whole.
+
+
+Linked but not vendored
+-----------------------
+libmicrohttpd — embedded HTTP server
+  Provided by the PS5 payload SDK as a static library and linked, not vendored.
+  Licence:   LGPL-2.1-or-later
+  Upstream:  https://www.gnu.org/software/libmicrohttpd/
+  Because it is linked statically, distributing binaries carries the usual LGPL
+  obligations (notably: the ability to relink against a modified libmicrohttpd).
+
+
+Referenced, not distributed
+---------------------------
+The following are separate programs or projects this one interoperates with or
+was informed by. No code from them is built into this binary except where noted
+above.
+
+  ps5-payload-dev/websrv     GPL-3.0+   HTTP server structure, asset embedding, PKG install
+  ps5-payload-dev/ftpsrv     GPL-3.0+   payload conventions, home-screen install flow
+  ps5-payload-dev/sdk        GPL-3.0+   build foundation
+  seregonwar/zftpd           MIT        socket buffer tuning reference
+  itsPLK/ps5-payload-manager GPL-3.0    payload packaging reference
+  etaHEN/etaHEN              GPL-3.0    ShellUI URI navigation used before exit
+  owendswang/wfm-7zip-helper GPL-3.0    archive extraction, distributed separately
+                                        and required at runtime for extraction
+                                        and for /api/extract
+
+
+Licence compatibility
+---------------------
+The whole is GPL-3.0-or-later. The vendored libraries are LGPL-2.1-or-later,
+which the LGPL permits to be combined with GPL-3.0 code (LGPL-2.1 section 3
+allows relicensing to GPL-2.0-or-later, and GPL-3.0 is permitted by this
+project's own "or later" option). The BSD-licensed rpcgen-derived libnfs files
+are permissive and impose no additional condition beyond attribution.
+
+PS5, PlayStation and related marks are trademarks of Sony Interactive
+Entertainment. This is unofficial homebrew and is neither affiliated with nor
+endorsed by Sony.

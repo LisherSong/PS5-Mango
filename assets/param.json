@@ -1,0 +1,17 @@
+{
+  "applicationCategoryType": 65536,
+  "titleId": "NEXS88888",
+  "deeplinkUri": "http://127.0.0.1:2026/",
+  "localizedParameters": {
+    "defaultLanguage": "en-US",
+    "en-US": {
+      "titleName": "PS5 Nexus"
+    },
+    "zh-Hans": {
+      "titleName": "PS5 Nexus"
+    },
+    "zh-Hant": {
+      "titleName": "PS5 Nexus"
+    }
+  }
+}

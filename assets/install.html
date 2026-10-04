@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/icon0.png">
+<title>PS5 Nexus — 启动</title>
+<style>
+:root{
+  --brand:#4d6bfe; --brand-text:#8fa9ff; --brand-soft:#131a33; --brand-line:rgba(77,107,254,.45);
+  --ok:#5ec98a; --ok-soft:#0f2018; --bad:#ff7b72; --bad-soft:#2a1210; --warn:#e3b341; --warn-soft:#241d0d;
+  --pri-bg:#ffffff; --pri-fg:#0a0a0a; --pri-hover:#e6e6e6;
+  --bg:#0b0e17; --s2:#10141f; --s3:#161b29; --ghost-line:rgba(255,255,255,.08); --text:#e7eaf3; --muted:#97a0b5;
+  --r-panel:14px; --r-sm:8px;
+}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 50% -10%,#16203f 0%,var(--bg) 60%);color:var(--text);font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:grid;place-items:center;padding:24px}
+.wrap{width:min(640px,100%);background:var(--s2);border:1px solid var(--ghost-line);border-radius:var(--r-panel);padding:32px}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.brand .mark{width:30px;height:30px;border-radius:var(--r-sm);background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:700}
+.brand b{font-size:18px;letter-spacing:.3px}
+.brand span{color:var(--muted);font-size:12px}
+h1{font-size:22px;margin:.2em 0 .4em}
+p{color:var(--muted)}
+.kv{display:flex;gap:10px;align-items:center;margin:14px 0;padding:12px 14px;border:1px solid var(--ghost-line);border-radius:var(--r-sm);background:var(--brand-soft)}
+.kv .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft);animation:breathe 2.6s ease-in-out infinite}
+@keyframes breathe{0%,100%{box-shadow:0 0 0 3px var(--ok-soft),0 0 0 0 rgba(94,201,138,0)}50%{box-shadow:0 0 0 3px var(--ok-soft),0 0 10px 1px rgba(94,201,138,.6)}}
+.btn{display:inline-block;margin-top:18px;padding:12px 20px;border-radius:var(--r-sm);background:var(--brand);color:#fff;text-decoration:none;font-weight:600}
+.btn:hover{filter:brightness(1.08)}
+.note{margin-top:16px;font-size:12.5px;color:var(--warn);background:var(--warn-soft);padding:10px 12px;border-radius:var(--r-sm)}
+code{background:var(--s3);padding:2px 6px;border-radius:6px;color:var(--brand-text)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><div class="mark">N</div><div><b>PS5 Nexus</b><br><span>NAS · 解压 · 吞吐续传 · 存档</span></div></div>
+  <h1>欢迎使用 PS5 Nexus</h1>
+  <p>本机地址是你在 PS5 浏览器（或同网手机 / 电脑）打开管理界面的唯一入口。端口默认为 <code>2026</code>，运行时由服务端上报，可能顺延。</p>
+  <div class="kv"><span class="dot"></span><div>HTTP 服务 · kstuff · SMB 三盏状态灯在界面顶栏呼吸显示</div></div>
+  <a class="btn" href="index.html">进入管理界面 →</a>
+  <div class="note">⚠️ 本页与 <code>index.html</code> 为单文件零依赖页面，gzip 内嵌进 ELF；离线可用，请勿引入 webfont 或外部 CDN。</div>
+</div>
+</body>
+</html>

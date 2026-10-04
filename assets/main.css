@@ -1,0 +1,469 @@
+
+/* ============================================================
+   风格 E：Harness 开发者页（居中方栏 × 分区长页）
+   视觉语言取自 DeepSeek Harness 的实际 CSS 令牌：
+     · 近黑底 #0a0a0a + 纯白低透明度叠层玻璃（白 1.5%~25%）
+     · 发丝级白边、24px 大圆角、12px 玻璃模糊
+     · 品牌蓝 #4d6bfe 是唯一的彩点；主按钮反转为「白底黑字」
+     · 大写拉丁小标题作分区标签；长页 + 大留白（分区间距 80px 起）
+
+   ⚠️ 一处刻意的工程偏离，值得记录：
+   站点令牌用的是 hsla(0,0%,100%,.5) 这类「半透明白 + alpha」。
+   照抄会让自动验收失效 —— 对比度算法只读颜色的 RGB 前三分量、
+   忽略 alpha，于是「白色 50% 叠在近黑上」被当成「纯白」，恒为 21:1
+   假通过。所以这里全部换成**预先合成好的不透明等价色**：
+   α=.5 的白叠在 #0a0a0a 上 = #858585（实际 5.7:1），视觉完全一致，
+   但对比度可被真实测量。原型可以骗眼睛，令牌不能骗断言。
+   ============================================================ */
+:root{
+  /* —— 底色与叠层（白 α 合成后的不透明等价色）—— */
+  --page:#0a0a0a;
+  --s4:#0d0d0d;   /* 白 1.5% */
+  --s3:#0f0f0f;   /* 白 2%   */
+  --s2:#141414;   /* 白 4%   */
+  --s1:#191919;   /* 白 6%   */
+  --s5:#262626;   /* 白 12%  */
+  --raised:#474747;/* 白 25%  */
+  /* —— 边线 —— */
+  --line:#242424; --line-div:#1e1e1e; --line-2:#3b3b3b; --line-strong:#414141;
+  /* —— 文字（白 α 合成后的不透明等价色）—— */
+  --fg:#ffffff; --fg2:#cecece; --fg3:#8a8a8a; --fg4:#545454;
+  /* —— 品牌蓝：填充与描边用原色，小字用提亮变体保证对比度 ——
+     --sheen 是进度条扫光的亮带色，故意写成**预先合成的不透明色**（= 35% 白叠在 --brand 上）
+     而不是 rgba(255,255,255,.35)：对比度断言只读 RGB 前三分量、会忽略 alpha，半透明值在断言里
+     等于纯白 —— 这个坑本项目已经踩过两次。两套主题共用（--brand 两套同值，亮带又只压在条子自身上）。 */
+  --brand:#4d6bfe; --brand-text:#8fa9ff; --sheen:#8b9ffe; --brand-soft:#131a33; --brand-line:rgba(77,107,254,.45);
+  /* —— 语义色（暗底上提亮）—— */
+  --ok:#5ec98a; --ok-soft:#0f2018; --bad:#ff7b72; --bad-soft:#2a1210; --warn:#e3b341; --warn-soft:#241d0d;
+  /* —— 按钮极化：暗色下主按钮是白底黑字 —— */
+  --pri-bg:#ffffff; --pri-fg:#0a0a0a; --pri-hover:#e6e6e6;
+  --ghost-hover:#1f1f1f; --ghost-line:#333333;
+  /* —— 形状 —— */
+  --r-card:24px; --r-panel:16px; --r-input:10px; --r-sm:8px; --r-pill:100px; --blur:12px;
+  --glow:0 0 0 1px rgba(255,255,255,.06),0 0 80px rgba(255,255,255,.07),0 24px 64px rgba(0,0,0,.4);
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 18px 40px -22px rgba(0,0,0,.7);
+  --sans:system-ui,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"SF Mono",monospace;
+  --maxw:1080px;
+}
+/* 亮色主题已按用户要求移除（2026-10-01）。本文件当前无人引用，与 assets/index.html
+   的内联样式重复；保留只是为了不改动构建清单，但不要再往这里加东西。 */
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{
+  background:var(--page);color:var(--fg);font:14px/1.65 var(--sans);
+  -webkit-font-smoothing:antialiased;transition:background .25s,color .25s;
+}
+.sprite{display:none}
+svg.i{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 26px;width:100%}
+
+/* ---------- 视图容器：每一屏是一个「界面」，不是文档的一章 ---------- */
+/* 原版把五块内容平铺成一条长滚动页，顶部导航点了只换高亮 —— 用户找不到
+   「我现在在哪、点这里会发生什么」。现在每块内容装进独立视图，互斥显示。*/
+.view{display:none}
+.view.on{display:block;animation:vin .24s cubic-bezier(.16,1,.3,1) both}
+@keyframes vin{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+/* 视图内的分区留白收敛：74px 是长页文档的呼吸感，装进视图后显得散 */
+.view .sec{padding:36px 0 0}
+/* 文件行：类型 / 名称 / 修改时间 / 大小 —— 没有进度列 */
+.row.f{grid-template-columns:92px minmax(0,1fr) 118px 104px}
+/* 视图内的吸顶栏底部加一条分隔，告诉用户「下面是内容区」*/
+.pagehead{padding:30px 0 6px}
+.pagehead .kicker{margin:0 0 10px}
+.pagehead h2{margin:0 0 8px;font:600 25px/1.35 var(--sans)}
+.pagehead p{margin:0;font-size:14.5px;color:var(--fg2);line-height:1.7;max-width:74ch}
+
+/* ---------- 吸顶栏 ---------- */
+/* 吸顶栏用不透明同色底：整页本来就是单一深色，模糊在上面产生不了任何视觉差异，
+   却引入一个 color-mix 兼容面 —— 不值得。玻璃模糊只保留给需要透出内容的场景（弹窗遮罩）。*/
+.top{position:sticky;top:0;z-index:20;background:var(--page);border-bottom:1px solid var(--line)}
+/* 🪤 这个容器必须叫 .topbar 而不是 .bar —— 组件进度条也叫 .bar，
+   而这里带了 min-height，min-height 会压过 .row .bar 的 height:5px，
+   结果是所有进度条被撑成 62px 厚。截图里能看出来，断言看不出来。
+   64px 是 PS5 上的取舍：顶栏是纯开销，但横向导航 + 一行状态必需，不能再矮。 */
+/* ⚠️ 顶栏放宽到 1200px（正文收窄到 1080）：加了「HTTP 服务 / SMB 服务」两个状态胶囊之后，
+   1180 装不下了 —— 实测子项合计 1096 + 9 个 gap 已超，最后一个图标按钮被挤到第二行，
+   header 从 64px 涨到 108px，多出一整行空白。顶栏是全局工具条，不该受正文阅读限宽约束。
+   ⚠️ 同时必须补 `padding:9px 24px` —— 原来 .topbar 的 `padding:9px 0` 盖掉了 .wrap 的水平留白，
+   在 max-width 还没触发的视口（=1280）下品牌会直接贴到屏幕左边缘。 */
+.wrap.topbar{max-width:1200px;padding:9px 24px}
+.topbar{display:flex;align-items:center;gap:10px;min-height:64px;flex-wrap:wrap;padding:9px 0}
+.brand{display:flex;align-items:center;gap:9px;font:600 14.5px/1 var(--sans);letter-spacing:.01em}
+.brand .mark{width:26px;height:26px;border-radius:var(--r-sm);background:var(--brand);color:#fff;display:grid;place-items:center;flex:none}
+.nav{display:flex;gap:2px;flex-wrap:wrap;margin-left:8px}
+/* 40px 而不是 34px：PS5 是触摸板 / 手柄驱动的光标，不是精确指针设备 */
+.nav button{height:40px;padding:0 14px;border-radius:var(--r-sm);font-size:14px;color:var(--fg3);display:flex;align-items:center;transition:background .15s,color .15s}
+.nav button:hover{background:var(--ghost-hover);color:var(--fg)}
+.nav button[aria-current=true]{background:var(--s5);color:var(--fg);font-weight:600}
+.sp{flex:1}
+.chip{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 9px;border-radius:var(--r-pill);border:1px solid var(--line-2);
+  background:var(--s2);font-size:12.5px;color:var(--fg2);white-space:nowrap}
+/* 小绿灯要呼吸：静态绿点在一屏里会被读成装饰，动起来才是「活着」的信号。
+   ⚠️ --ok-soft 在这个文件里是**实色**（暗色主题 #0f2018），拿它当光晕只会得到一个深色环，
+   所以第二层光晕必须直接写 rgba —— 沿用 --ok 的 rgb(94,201,138)。
+   ⚠️ 顶栏三个灯共用同一 keyframes，相位会完全同步（同时亮、同时暗）。这是有意的：
+   同步读起来是「整个系统在运行」，各自错开反而像三个进程在各自挣扎。 */
+.chip i{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none;
+  box-shadow:0 0 0 3px var(--ok-soft);animation:breathe 2.6s ease-in-out infinite}
+@keyframes breathe{
+  0%,100%{box-shadow:0 0 0 3px var(--ok-soft),0 0 0 0 rgba(94,201,138,0)}
+  50%    {box-shadow:0 0 0 3px var(--ok-soft),0 0 10px 1px rgba(94,201,138,.6)}
+}
+/* 本机地址：PS5 自己没有 ipconfig，而「用电脑 / 手机打开同一个界面」必然要手打这个地址
+   ⇒ 必须常驻页首并能一键复制；藏进设置抽屉等于没有。
+   端口是运行时探测的（2026 被占就顺延），所以这个值来自服务端上报，不是写死的常量。
+   视觉高度只比状态胶囊高 2px，命中区用 ::after 单独撑到 40px —— PS5 是触摸板光标，不精确，
+   但把控件画肥会挤掉顶部横向导航的位置，所以「看着小」和「点得中」得分开处理。 */
+.ipchip{position:relative;height:30px;cursor:pointer;font:12.5px/1 var(--mono);font-variant-numeric:tabular-nums}
+.ipchip::after{content:"";position:absolute;left:0;right:0;top:50%;height:40px;transform:translateY(-50%)}
+.ipchip .i{width:13px;height:13px;color:var(--fg3)}
+.ipchip:hover{background:var(--ghost-hover);border-color:var(--line-strong);color:var(--fg)}
+.ipchip[data-copied]{background:var(--ok-soft);border-color:var(--ghost-line);color:var(--ok)}
+.ipchip[data-copied] .i{color:var(--ok)}
+.btn{height:36px;padding:0 15px;border-radius:var(--r-input);border:1px solid var(--ghost-line);font-size:13.5px;display:inline-flex;align-items:center;gap:8px;
+  white-space:nowrap;transition:background .15s,border-color .15s,transform .12s,color .15s}
+.btn:hover{background:var(--ghost-hover);border-color:var(--line-strong)}
+.btn:active{transform:scale(.985)}
+.btn.pri{background:var(--pri-bg);border-color:var(--pri-bg);color:var(--pri-fg);font-weight:600}
+.btn.pri:hover{background:var(--pri-hover);border-color:var(--pri-hover);color:var(--pri-fg)}
+/* 扫光 ②（「其他地方也可以加」的落点）：首屏 CTA 主按钮每 6.2s 扫过一次，前 58% 静止。
+   连续流光在这套语言里会变成噪音，**间断一次**才像在「招呼」。
+   ⚠️ 扫光色必须用 --pri-fg 而不是白色：这套 token 里主按钮是**反色**的 —— 暗色主题下它是
+   白底黑字，白色扫光完全看不见。用前景色 + opacity 才是对的 —— 现在只有一套暗色，但这条
+   依然成立：哪天有人把 --pri-fg 换成硬编码 #fff，扫光立刻消失。
+   只给 .cta 里的主按钮；顶栏那个「解压」同为 .btn.pri 但不加 —— 那里已有三个呼吸灯，再亮一个就吵。 */
+.cta .btn.pri{position:relative;overflow:hidden}
+.cta .btn.pri::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:linear-gradient(105deg,transparent 45%,var(--pri-fg) 50%,transparent 55%);
+  background-size:200% 100%;background-position:200% 0;opacity:.34;
+  animation:sheen 6.2s ease-in-out infinite}
+@keyframes sheen{0%,58%{background-position:200% 0}100%{background-position:-100% 0}}
+.btn.sm{height:30px;padding:0 11px;font-size:12.5px;border-radius:var(--r-sm)}
+.btn.icon{width:36px;padding:0;justify-content:center;border-color:transparent}
+.btn.icon:hover{border-color:var(--ghost-line)}
+/* 禁用：aria-disabled 保住 title（disabled 会带 pointer-events:none，提示永远弹不出来） */
+.btn[aria-disabled=true]{opacity:.4}
+.btn[aria-disabled=true]:hover{background:none;border-color:var(--ghost-line);cursor:not-allowed}
+.pill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:var(--r-pill);font-size:12px;font-weight:600;white-space:nowrap}
+.pill.b{background:var(--brand-soft);color:var(--brand-text)}
+.pill.g{background:var(--ok-soft);color:var(--ok)}
+.pill.r{background:var(--bad-soft);color:var(--bad)}
+.pill.n{background:var(--s5);color:var(--fg2)}
+
+/* ---------- Hero ---------- */
+.hero{position:relative;text-align:center;padding:78px 0 62px}
+.hero::before{content:"";position:absolute;left:50%;top:14px;transform:translateX(-50%);width:min(760px,92vw);height:340px;border-radius:50%;
+  background:radial-gradient(closest-side,rgba(77,107,254,.16),transparent 72%);pointer-events:none}
+.kicker{position:relative;margin:0 0 18px;font:600 11.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--fg3)}
+.hero h1{position:relative;margin:0 0 20px;font:600 clamp(30px,4.3vw,50px)/1.22 var(--sans);letter-spacing:0}
+.hero h1 em{font-style:normal;color:var(--brand-text)}
+.hero .sub{position:relative;margin:0 auto;max-width:60ch;font-size:16px;line-height:1.75;color:var(--fg2)}
+.cta{position:relative;display:flex;gap:11px;justify-content:center;margin:30px 0 0;flex-wrap:wrap}
+.cta .btn{height:44px;padding:0 22px;font-size:14.5px;border-radius:var(--r-pill)}
+.facts{position:relative;display:flex;gap:9px;justify-content:center;margin:26px 0 0;flex-wrap:wrap}
+
+/* ---------- 命令块 ---------- */
+.cmds{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:8px 0 0}
+.cmd{background:var(--s3);border:1px solid var(--line);border-radius:var(--r-panel);overflow:hidden;min-width:0}
+.cmd-h{display:flex;align-items:center;gap:9px;padding:12px 15px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--fg3)}
+.cmd-h .sp{flex:1}
+.cmd-h button{font-size:12.5px;color:var(--fg3);display:flex;align-items:center;gap:5px;padding:3px 7px;border-radius:6px}
+.cmd-h button:hover{background:var(--ghost-hover);color:var(--fg)}
+.cmd pre{margin:0;padding:15px;overflow-x:auto;font:13px/1.6 var(--mono);color:var(--fg2);white-space:pre}
+.cmd pre .p{color:var(--brand-text);user-select:none}
+
+/* ---------- 分区 ---------- */
+.sec{padding:74px 0 0}
+.sec-h{margin-bottom:24px;max-width:74ch}
+.sec-h .kicker{margin-bottom:12px}
+.sec h2{margin:0 0 10px;font:600 25px/1.35 var(--sans)}
+.sec-sub{margin:0;font-size:14.5px;color:var(--fg2);line-height:1.7}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.card{background:var(--s3);border:1px solid var(--line);border-radius:var(--r-card);padding:22px 24px;transition:border-color .2s,background .2s}
+.card:hover{border-color:var(--line-2)}
+.card .kicker{margin:0 0 10px}
+.card h3{margin:0 0 9px;font:600 16.5px/1.4 var(--sans);display:flex;align-items:center;gap:9px}
+.card h3 svg{color:var(--brand-text)}
+.card p{margin:0;font-size:13.5px;line-height:1.7;color:var(--fg2)}
+.card p+p{margin-top:9px}
+
+/* 当前任务大卡 */
+.focus{background:var(--s4);border:1px solid var(--line);border-radius:var(--r-card);padding:26px 28px;box-shadow:var(--glow)}
+.focus-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.focus-h .t{font:600 20px/1.3 var(--sans)}
+.focus-h .acts{margin-left:auto;display:flex;gap:8px}
+.route{display:flex;align-items:center;gap:9px;margin:11px 0 0;font-size:13px;color:var(--fg3);flex-wrap:wrap}
+.route em{font-style:normal;color:var(--fg2);font-family:var(--mono)}
+.track{height:8px;border-radius:4px;background:var(--s5);overflow:hidden;margin:18px 0 18px}
+.track i{display:block;height:100%;border-radius:4px;background:var(--brand);transition:width .5s cubic-bezier(.16,1,.3,1)}
+/* 扫光只给**正在运行**的条，判据就是「JS 在不在推它」—— `[data-p]`（或 `.pulse`）：
+   ① 当前任务大卡 `.track.pulse`；② 「最近任务」表格里表头写着「进度」的那一列。
+   ⚠️ ②是 2026-09-27 用户反馈「demo5 的进度条闪光效果没有」补上的：它和大卡是**同一个任务**
+   （同屏两处都是 71%），只给大卡带 `.pulse` 就留下「一个在动、一个不动」的矛盾 —— 而表格那一列
+   的表头恰好就叫「进度」，用户眼里它才是「进度条」。
+   ⚠️ 判据只能看「是不是在跑」，**不能按类名/位置去分类**：`.bar` 这个类名同时用在
+   容量条（`.meter .bar`，/data · M.2 · USB · NAS）和行内进度上，长得一样、含义不同 ——
+   区分它们的唯一可靠依据就是 `data-p` 这个「JS 每 900 ms 在推」的钩子。
+   其余一概不加：排队/已完成的行、以及所有容量条表达的是「占用率」而不是「进行中」，
+   让静态条也闪等于把「在跑」这个信号稀释掉。
+
+   ⚠️⚠️ **2026-09-27 第二次返工：上一版的写法「动画在跑、肉眼是静止的」。**
+   上一版是 `linear-gradient(90deg, brand, brand-text, brand)` + 位移 —— 首尾同色 ⇒ 平铺接缝无缝，
+   看着很优雅，但**整条条子只剩一条从暗到亮的平滑斜坡**：探针里 `background-position` 一直在变、
+   四相位截图字节数也各不相同，可用户看到的是**不动**。像素剖面量出来是 `145 142 … 112 … 130`
+   —— 全程没有一处台阶。**眼睛盯的是「边」，不是「坡度」**：一条 1122px 宽的平滑斜坡，
+   亮度从 111 滑到 170 也形成不了一条可盯的边。
+   对照 demo1：它能「看见闪光」其实是个巧合 —— 它两端**不同色**（accent → #e7bc76），
+   平铺接缝落成一条硬边在扫。也就是说「首尾同色」这条规则**恰恰是杀死信号的元凶**。
+   现在两边统一成「底色 + 一条**带硬边**的窄亮带」，三条性质同时成立：
+     ① **无缝**：两端都透明 ⇒ 接缝处是底色接底色，条子本身不跳；
+     ② **看得见**：停点成对紧贴（47.6% / 52.4%）⇒ 有一条 0.4% 宽的陡变，眼睛就是靠它定位；
+     ③ **在跑**：亮带横穿一趟为一个周期。
+   `background-repeat:no-repeat` + `100% → 0%`（**不是** `0% → -200%`）：图像宽 200%，
+   百分比定位的位移 = (容器 − 图像) × p，所以 100% 把亮带放在左端、0% 放在右端，
+   一趟扫过正好一个条宽；配 no-repeat 保证一个周期只出现一条带（repeat 会同时露出邻位拷贝）。
+   别改成 `0% → -200%`：那是给**平铺**用的（位移两个条宽才回到原样），配 no-repeat 会在半程空屏。 */
+.track.pulse i, .row .bar[data-p] i{background-color:var(--brand);
+  background-image:linear-gradient(90deg,transparent 0 44%,var(--sheen) 47.6% 52.4%,transparent 56% 100%);
+  background-size:200% 100%;background-repeat:no-repeat;animation:sh 2.4s linear infinite}
+@keyframes sh{from{background-position:100% 0}to{background-position:0 0}}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.stats div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.stats b{font:600 24px/1 var(--mono);font-variant-numeric:tabular-nums}
+.stats span{font-size:12.5px;color:var(--fg3)}
+.stats .hl b{color:var(--brand-text)}
+
+/* KV / 进度条 / 指标 */
+.kv{display:flex;flex-direction:column;gap:12px}
+.kv .r{display:flex;align-items:center;gap:10px;font-size:13.5px}
+.kv .r .lb{color:var(--fg3);min-width:0}
+.kv .r .vl{margin-left:auto;font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums}
+.kv .r .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none;box-shadow:0 0 0 3px var(--ok-soft)}
+.kv .r .dot.off{background:var(--fg4);box-shadow:0 0 0 3px var(--s5)}
+.note{display:flex;gap:10px;padding:12px 14px;border-radius:var(--r-panel);background:var(--warn-soft);color:var(--warn);font-size:12.5px;line-height:1.6}
+.note.info{background:var(--brand-soft);color:var(--brand-text)}
+.note.bad{background:var(--bad-soft);color:var(--bad)}
+.note.ok{background:var(--ok-soft);color:var(--ok)}
+.note svg{margin-top:2px;flex:none}
+.note b{font-weight:650}
+.meter{display:flex;flex-direction:column;gap:7px}
+.meter .h{display:flex;font-size:13px;color:var(--fg2)}
+.meter .h span:last-child{margin-left:auto;font:12.5px var(--mono);color:var(--fg3)}
+.meter .bar{height:5px;border-radius:3px;background:var(--s5);overflow:hidden}
+.meter .bar i{display:block;height:100%;border-radius:3px;background:var(--brand)}
+
+/* ---------- 任务列表（默认视图里可聚焦的行）---------- */
+.panel{background:var(--s4);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden}
+.row{display:grid;grid-template-columns:104px minmax(0,1fr) 160px 132px;align-items:center;gap:16px;min-height:58px;padding:0 24px;border-top:1px solid var(--line-div)}
+.row:first-child{border-top:0}
+.row.h{min-height:42px;background:var(--s3);font:600 11.5px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--fg3)}
+.row:not(.h){cursor:pointer;transition:background .15s}
+.row:not(.h):hover{background:var(--s3)}
+/* 行内 inset 环：全局 outline 会越出 58px 的行、压住邻行 */
+.row:not(.h):focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--brand-line),inset 3px 0 0 var(--brand)}
+.row .nm{display:flex;align-items:center;gap:9px;font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .nm em{font-style:normal;font:600 10.5px/1 var(--sans);padding:4px 6px;border-radius:5px;background:var(--s5);color:var(--fg3);flex:none}
+.row .bar{height:5px;border-radius:3px;background:var(--s5);overflow:hidden;min-width:0}
+.row .bar i{display:block;height:100%;border-radius:3px;background:var(--brand)}
+.row .m{font:12.5px var(--mono);font-variant-numeric:tabular-nums;color:var(--fg3);text-align:right;white-space:nowrap}
+.row .m b{color:var(--fg2)}
+
+/* ---------- 四种落地形态 ---------- */
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.tile{position:relative;background:var(--s2);border:1px solid var(--line);border-radius:var(--r-panel);padding:18px;transition:border-color .2s,background .2s}
+.tile:hover{border-color:var(--brand-line);background:var(--s3)}
+.tile .cap{font:600 10.5px/1 var(--sans);letter-spacing:.13em;text-transform:uppercase;color:var(--fg3);margin-bottom:10px}
+.tile b{display:block;font:600 15.5px/1.4 var(--sans);margin-bottom:7px}
+.tile p{margin:0;font-size:12.5px;line-height:1.65;color:var(--fg3)}
+
+/* ---------- 对话框 ---------- */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.62);backdrop-filter:blur(var(--blur));display:none;z-index:50}
+.scrim.on{display:grid;place-items:center;animation:fade .16s ease-out both}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.dlg{width:min(660px,94vw);max-height:88vh;overflow:auto;background:var(--page);border:1px solid var(--line-2);border-radius:var(--r-card);
+  box-shadow:0 30px 80px -20px rgba(0,0,0,.7);animation:pop .24s cubic-bezier(.16,1,.3,1) both}
+@keyframes pop{from{opacity:0;transform:translateY(14px) scale(.99)}to{opacity:1;transform:none}}
+.dlg-h{display:flex;align-items:center;gap:11px;padding:20px 24px 14px;border-bottom:1px solid var(--line)}
+.dlg-h h2{margin:0;font:600 17px var(--sans)}
+.dlg-h .sp{flex:1}
+.dlg-b{padding:20px 24px 4px}
+.fld{margin-bottom:18px}
+.fld>label{display:block;font-size:12.5px;color:var(--fg3);margin-bottom:9px}
+.fld input[type="password"],.fld input[type="text"]{width:100%;height:40px;padding:0 13px;border:1px solid var(--line);border-radius:var(--r-input);background:var(--s3);color:var(--fg);font:13.5px var(--mono)}
+.fld input[type="password"]{letter-spacing:.06em}
+.fld input[type="password"]::placeholder,.fld input[type="text"]::placeholder{color:var(--fg3);letter-spacing:0}
+.fld input[type="password"]:focus,.fld input[type="text"]:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.crumbs{display:flex;align-items:center;gap:3px;flex-wrap:wrap;padding:9px 11px;border:1px solid var(--line);border-radius:var(--r-input);background:var(--s3);font:13px var(--mono);color:var(--fg2)}
+.crumbs button{padding:4px 7px;border-radius:6px;font:inherit;color:var(--fg3)}
+.crumbs button:hover{background:var(--s5);color:var(--fg)}
+.picker{margin-top:10px;border:1px solid var(--line);border-radius:var(--r-input);overflow:hidden auto;max-height:214px;background:var(--s3)}
+.picker .r{display:grid;grid-template-columns:20px 1fr auto;gap:11px;align-items:center;min-height:46px;padding:0 14px;border-top:1px solid var(--line-div);font-size:14px;cursor:pointer}
+.picker .r:first-child{border-top:0}
+.picker .r:hover{background:var(--s2)}
+.picker .r.sel{background:var(--brand-soft);box-shadow:inset 3px 0 0 var(--brand)}
+.picker .r .sz{font:12.5px var(--mono);color:var(--fg3)}
+.quick{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}
+.quick button{height:34px;padding:0 13px;border:1px solid var(--line);border-radius:var(--r-pill);background:var(--s3);font-size:13px;color:var(--fg2);display:flex;align-items:center;gap:7px}
+.quick button:hover{border-color:var(--line-2);color:var(--fg)}
+.quick button[aria-pressed=true]{border-color:var(--brand-line);background:var(--brand-soft);color:var(--brand-text);font-weight:600}
+.cbrow{display:flex;gap:12px;align-items:flex-start;padding:15px;border:1px solid var(--line);border-radius:var(--r-input);background:var(--s3)}
+.cbrow input{width:18px;height:18px;margin:3px 0 0;accent-color:var(--brand);flex:none}
+.cbrow .t{font-size:14px}
+.cbrow .d{display:block;font-size:12.5px;color:var(--fg3);line-height:1.65;margin-top:4px}
+.cbrow code{font:12px var(--mono);background:var(--s5);padding:2px 6px;border-radius:5px;color:var(--brand-text)}
+.space{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--fg2);border-top:1px solid var(--line);padding-top:16px}
+.space b{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--fg)}
+.dlg-f{display:flex;gap:10px;justify-content:flex-end;padding:18px 24px 22px}
+
+/* ---------- 设计说明抽屉 ---------- */
+.drawer{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:60}
+.docs{position:absolute;right:0;top:0;bottom:0;width:min(430px,94vw);background:var(--page);border-left:1px solid var(--line-2);
+  padding:26px;overflow:auto;transform:translateX(101%);transition:transform .28s cubic-bezier(.16,1,.3,1);pointer-events:auto;
+  box-shadow:-24px 0 60px -24px rgba(0,0,0,.6)}
+.docs.on{transform:none}
+.docs .kicker{margin:0 0 8px}
+.docs h3{margin:0 0 6px;font:600 17px var(--sans)}
+.docs .lead{color:var(--fg3);font-size:12.5px;margin:0 0 18px;line-height:1.7}
+.docs ol{margin:0;padding-left:19px;display:flex;flex-direction:column;gap:13px}
+.docs li{font-size:13px;line-height:1.7;color:var(--fg2)}
+.docs li b{color:var(--fg);display:block;font-weight:650}
+.docs code{font:12px var(--mono);background:var(--s5);padding:1px 5px;border-radius:4px;color:var(--brand-text)}
+
+/* ---------- 页脚 ---------- */
+.foot{margin-top:78px;border-top:1px solid var(--line);padding:30px 0 60px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--fg3)}
+
+/* ⚠️ [hidden] 只是 UA 样式；`.gcard{display:flex}` / `.svi{display:grid}` 这类作者样式
+   会直接盖掉它 —— 用了 display 的组件想让 el.hidden 生效，必须自己写这条。
+   （JS 里拿 hidden 做筛选，漏了这条就变成「按钮按下去没反应」的假交互。） */
+.gcard[hidden],.svi[hidden],.svdetail[hidden]{display:none}
+
+/* ---------- 分段控件 / 搜索框（游戏页与存档页共用） ---------- */
+.libbar,.savebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.seg{display:flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:var(--r-input);background:var(--s3)}
+.seg button{height:32px;padding:0 13px;border-radius:7px;font-size:13px;color:var(--fg3);display:inline-flex;align-items:center;gap:6px}
+.seg button:hover{color:var(--fg)}
+.seg button[aria-pressed=true]{background:var(--s5);color:var(--fg);font-weight:600}
+.seg button .num{font-size:12px;color:var(--fg3)}
+.search{display:flex;align-items:center;gap:9px;height:38px;padding:0 13px;border:1px solid var(--line-2);
+  border-radius:var(--r-input);background:var(--s3);color:var(--fg3);min-width:min(300px,100%)}
+.search input{flex:1;min-width:0;border:0;background:none;color:var(--fg);font:13.5px var(--sans);outline:none}
+.search input::placeholder{color:var(--fg4)}
+.count{font-size:12.5px;color:var(--fg3)}
+
+/* ---------- 游戏：封面网格 ----------
+   封面来源 = PKG 内的 sce_sys/icon0.png，它和 param.json 在同一个 PFS 镜像里。
+   原型里没有真 PKG 可抽，所以封面是程序化替身；抽不到时的回退态也在这里 ——
+   一排卡片里留一个视觉空洞，比「有封面」这件事本身更糟。 */
+.covers{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:14px;margin-top:14px}
+.gcard{background:var(--s3);border:1px solid var(--line);border-radius:var(--r-panel);padding:10px;
+  display:flex;flex-direction:column;gap:10px;transition:border-color .18s,background .18s,transform .18s}
+.gcard:hover{border-color:var(--line-2);background:var(--s2);transform:translateY(-2px)}
+.gcard:focus-visible{outline:none;box-shadow:0 0 0 2px var(--brand),0 0 0 4px var(--brand-soft)}
+.cover{position:relative;aspect-ratio:3/4;border-radius:12px;overflow:hidden;display:grid;place-items:center;
+  border:1px solid var(--line-2);background:var(--s5)}
+.cover::after{content:"";position:absolute;inset:0;background:linear-gradient(150deg,rgba(255,255,255,.16),transparent 46%)}
+.cover .mark{position:relative;font:700 26px/1 var(--sans);letter-spacing:.1em;color:#fff;text-shadow:0 2px 16px rgba(0,0,0,.55)}
+.cover .plat{position:absolute;left:8px;top:8px;z-index:2;font:700 10px/1 var(--sans);letter-spacing:.08em;
+  padding:4px 6px;border-radius:5px;background:rgba(10,10,10,.62);color:#fff}
+.cover.a1{background:radial-gradient(115% 85% at 22% 14%,#ffb066 0%,#e8552c 38%,#7d1c12 72%,#2a0a06 100%)}
+.cover.a2{background:radial-gradient(120% 90% at 78% 18%,#9fd7ff 0%,#3a72d8 40%,#16265c 78%,#080d1e 100%)}
+.cover.a3{background:radial-gradient(110% 95% at 30% 80%,#7ef0c8 0%,#1c9c78 42%,#0b3a30 78%,#04120f 100%)}
+.cover.a4{background:radial-gradient(125% 88% at 70% 78%,#ffd9a0 0%,#c98a2e 40%,#4a2c0c 76%,#170d03 100%)}
+.cover.a5{background:radial-gradient(115% 92% at 26% 24%,#e3b8ff 0%,#8a4ddb 42%,#33165e 78%,#0d0618 100%)}
+.cover.a6{background:radial-gradient(120% 90% at 74% 22%,#ffc2d4 0%,#d94f7c 40%,#4d1230 78%,#15040d 100%)}
+.cover.locked::before{content:"";position:absolute;inset:0;background:rgba(0,0,0,.36)}
+.cover.locked .mark{opacity:.32}
+.cover.locked .lock{position:absolute;right:8px;top:8px;z-index:2;width:22px;height:22px;color:#fff}
+/* 回退态：没有 icon0.png 时不留空洞，但一眼能看出「这是占位」 */
+.cover.fb{background:var(--s5);border-style:dashed}
+.cover.fb::after{display:none}
+.cover.fb .mark{font:600 13px/1.4 var(--mono);letter-spacing:.02em;color:var(--fg4);text-align:center;padding:0 8px}
+.cover.fb .cap{position:absolute;bottom:9px;left:0;right:0;text-align:center;font-size:11px;color:var(--fg4)}
+.gbody{display:flex;flex-direction:column;gap:7px;min-width:0}
+.gtitle{font:600 13.5px/1.4 var(--sans);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.gmeta{display:flex;flex-direction:column;gap:3px;font:11.5px/1.5 var(--mono);color:var(--fg3);font-variant-numeric:tabular-nums}
+.gacts{display:flex;align-items:center;gap:8px;margin-top:2px}
+.gacts .btn{margin-left:auto}
+
+/* ---------- 存档：三栏工作台 + 终端日志 ----------
+   骨架借自 Garlic SaveMgr（左容器列表 / 右详情 / 底部终端日志），
+   但一级导航不放动作 —— 在它那里 Decrypt / Encrypt / Resign / Import 是导航项，
+   而我们的 IA 规定「导航 = 页面，动作 = 按钮」。 */
+.svwork{display:grid;grid-template-columns:306px minmax(0,1fr);gap:14px;margin-top:14px;align-items:start}
+.svlist{background:var(--s4);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden}
+.svlist-h{display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--line);
+  font:600 11.5px/1 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--fg3)}
+.svlist-h .sp{flex:1}
+.svi{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:11px;align-items:center;
+  padding:12px 16px;border-top:1px solid var(--line-div);cursor:pointer;transition:background .15s}
+.svi:first-of-type{border-top:0}
+.svi:hover{background:var(--s3)}
+.svi[aria-selected=true]{background:var(--brand-soft);box-shadow:inset 3px 0 0 var(--brand)}
+.svi .cb{width:16px;height:16px;margin:0;accent-color:var(--brand)}
+.svi .t{display:flex;flex-direction:column;gap:4px;min-width:0}
+.svi .t b{font:600 13.5px/1.35 var(--sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.svi .t .sub{font:11.5px/1 var(--mono);color:var(--fg3);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.svi .tags{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex:none}
+.svdetail{background:var(--s4);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden;min-height:352px}
+.svd-h{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.svd-h .t{font:600 15px/1.3 var(--sans)}
+.svd-h .sp{flex:1}
+.svd-b{padding:16px 20px 20px;display:flex;flex-direction:column;gap:14px}
+.svd-lb{font:600 11px/1 var(--sans);letter-spacing:.11em;text-transform:uppercase;color:var(--fg3)}
+.slots,.snaps{display:flex;flex-direction:column;gap:8px}
+.slot{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;
+  padding:11px 13px;border:1px solid var(--line);border-radius:var(--r-input);background:var(--s3)}
+.slot .n{font:12.5px var(--mono);color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot .v{font:11.5px var(--mono);color:var(--fg3);font-variant-numeric:tabular-nums}
+.snap{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;
+  padding:10px 13px;border:1px solid var(--line);border-radius:var(--r-input);background:var(--s3);font-size:12.5px}
+.snap .tm{font:11.5px var(--mono);color:var(--fg3);font-variant-numeric:tabular-nums}
+.snap .why{color:var(--fg2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  min-height:352px;padding:34px 26px;text-align:center;color:var(--fg3)}
+.empty svg{width:34px;height:34px;opacity:.55}
+.empty h3{margin:0;font:600 15.5px/1.4 var(--sans);color:var(--fg2)}
+.empty p{margin:0;font-size:13px;line-height:1.7;max-width:48ch}
+.empty .acts{display:flex;gap:9px;flex-wrap:wrap;justify-content:center;margin-top:4px}
+/* 终端日志：借自 Garlic 的 TERMINAL 面板 —— 不可逆操作必须留痕 */
+.console{background:#070707;border:1px solid var(--line);border-radius:var(--r-panel);overflow:hidden}
+.console-h{display:flex;align-items:center;gap:9px;padding:10px 15px;border-bottom:1px solid var(--line);
+  font:600 11px/1 var(--sans);letter-spacing:.13em;text-transform:uppercase;color:var(--fg3)}
+.console-h .sp{flex:1}
+.lines{list-style:none;margin:0;padding:12px 15px;display:flex;flex-direction:column;gap:6px;
+  font:12.5px/1.55 var(--mono);color:var(--fg2);max-height:174px;overflow:auto}
+.lines li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:11px}
+.lines .tm{color:var(--fg3);font-variant-numeric:tabular-nums}
+.lines .ok{color:var(--ok)}
+.lines .wn{color:var(--warn)}
+.lines code{background:var(--s5);padding:1px 5px;border-radius:4px;color:var(--brand-text)}
+
+@media (max-width:1020px){
+  .grid3,.tiles{grid-template-columns:1fr 1fr}
+}
+@media (max-width:760px){
+  .hero{padding:52px 0 44px}
+  .sec{padding:52px 0 0}
+  .cmds,.grid3,.grid2,.tiles,.stats{grid-template-columns:1fr}
+  .focus{padding:20px 18px}
+  .topbar{gap:9px}
+  .nav{margin-left:0}
+  /* 窄屏：工作台塌成一列，封面网格降密度 —— 但不能靠 overflow:hidden 掩盖 */
+  .svwork{grid-template-columns:1fr}
+  .covers{grid-template-columns:repeat(auto-fill,minmax(138px,1fr))}
+  .search{min-width:100%}
+  .svd-h,.svd-b,.svi{padding-left:14px;padding-right:14px}
+  /* 窄屏降级为「优先级列」：保留状态 + 名称，进度与均速让位（它们在宽屏才有意义） */
+  /* ⚠️ .row.f 必须一起列出来：它的特异性(0,2,0) 高于本段的 .row(0,1,0)，
+     只写 .row 压不住它 —— 4 列会在 390px 上把整页撑宽。 */
+  .row,.row.f{grid-template-columns:auto minmax(0,1fr);gap:11px;padding:0 16px;min-height:56px}
+  .row.h{display:none}
+  .row .bar,.row .m{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
