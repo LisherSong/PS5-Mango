@@ -1258,6 +1258,38 @@ def main():
         check("copy_tree_r has forensics markers (FILE-BEFORE + DIR + CHILD-FAIL)",
               ctr >= 0 and "cpy FILE-BEFORE" in cpy_body
               and "cpy DIR" in cpy_body and "cpy CHILD-FAIL" in cpy_body)
+        # ---- 源码级防回归 5：NAS 拉取任务的 current 文本 ----
+        # 用户报「复制全程一直显示正在统计远端目录」：nas_copy_worker 把 current
+        # 设成该文案后，nas_pull_file 每块 task_update(…, task->current, …) 把旧
+        # 文本原样写回 —— 标题永远停在扫描阶段。钉死三契约：①扫描阶段每个目录
+        # 推进 current（与 filemgr 删除管线的 count_path_bytes_sync 同口径）；
+        # ②拉取阶段 current 换成正在拉的文件路径；③两处都必须经 nas_url_label
+        # 脱敏 —— task->srcs 里的 URL 带 user:pass，而 current 会经 /api/tasks
+        # 的 label/note 原样回显到页面。
+        scan_w = nx_src.find("nas_scan_tree(nas_copy_ctx_t *c, const char *url")
+        scan_end = nx_src.find("nas_pull_tree(nas_copy_ctx_t *c")
+        scan_body = nx_src[scan_w:scan_end] if scan_w >= 0 and scan_end > scan_w else ""
+        check("nas_scan_tree advances current while scanning (the stuck "
+              "'正在统计远端目录' label was the reported bug)",
+              scan_w >= 0 and "task_update(c->task, TASK_RUNNING, lbl, 0, NULL)" in scan_body
+              and "nas_url_label(url, lbl, sizeof(lbl))" in scan_body,
+              "body=%r" % scan_body[:300])
+        pull_w = nx_src.find("nas_pull_file(file_task_t *task, transfer_src_t **slot")
+        pull_end = nx_src.find("fetch_worker(void *arg)")
+        pull_body = nx_src[pull_w:pull_end] if pull_w >= 0 and pull_end > pull_w else ""
+        check("nas_pull_file updates current to the file being pulled "
+              "(never re-passing the stale scan label)",
+              pull_w >= 0 and "task_update(task, TASK_RUNNING, lbl, 0, NULL)" in pull_body
+              and "task_update(task, TASK_RUNNING, task->current" not in pull_body,
+              "body=%r" % pull_body[:300])
+        lbl_w = nx_src.find("nas_url_label(const char *url")
+        lbl_body = nx_src[lbl_w:lbl_w + 1200] if lbl_w >= 0 else ""
+        check("nas_url_label parses via transfer_url_parse and NEVER echoes the "
+              "raw URL (a malformed one may still carry user:pass)",
+              lbl_w >= 0 and "transfer_url_parse(url, &nas)" in lbl_body
+              and 'snprintf(out, out_size, "%s", url)' not in lbl_body
+              and 'snprintf(out, out_size, "?")' in lbl_body,
+              "body=%r" % lbl_body[:400])
         st, j = c.api_post("/api/save/list", {"title_id": title})
         snaps3 = (j or {}).get("snapshots") or []
         check("save/delete reports save_found=false afterwards",
@@ -1500,17 +1532,36 @@ def main():
             check("nas/copy queues a pull task", j and j.get("ok")
                   and nas_id is not None, "st=%s j=%s" % (st, j))
             nas_last = {}
+            nas_labels = []
+            run_labels = []
             if nas_id is not None:
                 for _ in range(150):
                     st, pj = c.api_post("/api/install/poll", {"id": str(nas_id)})
                     if not pj or not pj.get("ok"):
                         break
                     nas_last = pj
+                    nas_labels.append(pj.get("label") or "")
+                    if pj.get("state_name") == "running":
+                        run_labels.append(pj.get("label") or "")
                     if pj.get("state_name") in ("done", "failed", "cancelled"):
                         break
                     time.sleep(0.05)
             check("nas/copy finished cleanly", nas_last.get("state_name") == "done",
                   "last=%s" % nas_last)
+            # 标签脱敏（真机 bug：复制全程标题停在「正在统计远端目录」；修复后
+            # current = 正在扫描/拉取的脱敏路径）。硬断言：任何状态下任务标签都
+            # 不得携带主机名/scheme —— task->srcs 里的 URL 带 user:pass，漏脱敏
+            # 就是把 NAS 密码贴到页面上。
+            check("nas/copy labels never leak host/scheme/credentials",
+                  all("127.0.0.1" not in l and "://" not in l for l in nas_labels),
+                  "labels=%r" % nas_labels)
+            # 行为证据（抓到 running 才断言：本 fixture 的文件只有十几字节，
+            # 极端情况下首个 poll 就是 done，抓不到运行中样本不硬凑）。
+            if run_labels:
+                check("nas/copy RUNNING label is the sanitized remote path "
+                      "(/share/path, advancing past the scan label)",
+                      all(l.startswith("/games") for l in run_labels),
+                      "run_labels=%r" % run_labels)
             got_readme = got_inner = None
             try:
                 with open(os.path.join(local_dst, "readme.txt"), "rb") as f:

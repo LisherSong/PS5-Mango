@@ -392,6 +392,28 @@ nas_source_for(transfer_src_t **slot, const char *url) {
   return *slot;
 }
 
+/* NAS URL → 可回显的脱敏路径：剥掉 scheme://user:pass@host:port，只留
+ * /share/path。task->current 会经 /api/tasks 的 label/note 原样回显到页面
+ * （filemgr.c api_tasks），而拼进 task->srcs 的 URL 带 user:pass ——
+ * 不脱敏就是把 NAS 密码贴到任务列表上。解析必须走 transfer_url_parse
+ * （与读取同一条解析器）：手写找 '/' 在密码含 '/' 时会切进密码段。 */
+static void
+nas_url_label(const char *url, char *out, size_t out_size) {
+  transfer_nas_t nas;
+
+  if(!transfer_url_parse(url, &nas)) {
+    /* 解析失败的 URL 可能带凭据，绝不能原样回显。 */
+    snprintf(out, out_size, "?");
+    return;
+  }
+  if(nas.path[0])
+    snprintf(out, out_size, "/%s/%s", nas.share, nas.path);
+  else if(nas.share[0])
+    snprintf(out, out_size, "/%s", nas.share);
+  else
+    snprintf(out, out_size, "/");
+}
+
 /* 一个远程文件 → 本地文件，带续传。
  *
  * ★ 单文件拉取（/api/fetch）与 NAS→本地复制（/api/nas/copy）必须走**同一条**路。
@@ -438,8 +460,14 @@ nas_pull_file(file_task_t *task, transfer_src_t **slot, const char *url,
   }
   /* ⚠️ 这里**不能**把 size == 0 当失败：空文件（.nomedia、锁文件、空的存档槽）
      是合法的，上一版 fetch 把它判成「拉取中断」，等于整棵目录树里有一个空文件
-     就复制不过去。真·不存在的情况由 transfer_size 自己报错。 */
-  task_update(task, TASK_RUNNING, task->current, 0, NULL);
+     就复制不过去。真·不存在的情况由 transfer_size 自己报错。
+     current 必须在这里换掉扫描阶段的「正在统计远端目录…」——否则整棵树拉完，
+     任务标题还停在统计文案（真机用户报的「一直显示正在统计远端目录」就是它）。 */
+  {
+    char lbl[PATH_MAX];
+    nas_url_label(url, lbl, sizeof(lbl));
+    task_update(task, TASK_RUNNING, lbl, 0, NULL);
+  }
 
   /* Resume. A destination holding part of the file is continued; one that is
      not smaller than the source is foreign (or the source shrank) and is
@@ -475,7 +503,7 @@ nas_pull_file(file_task_t *task, transfer_src_t **slot, const char *url,
       goto out;
     }
     offset += got;
-    task_update(task, TASK_RUNNING, task->current, got, NULL);
+    task_update(task, TASK_RUNNING, NULL, got, NULL);
   }
   outcome = (offset < remote_size) ? -1 : 0;
 
@@ -546,6 +574,14 @@ nas_scan_tree(nas_copy_ctx_t *c, const char *url, uint64_t *bytes,
     return -1;
   }
   if(task_cancel_requested(c->task)) return 1;
+  /* 每列一个目录就把 current 推到这个路径（脱敏）—— 与 filemgr 删除管线的
+   * count_path_bytes_sync 同一口径：扫描阶段没有分母，进度数字纹丝不动，
+   * 唯一能证明「没卡死」的就是正在扫的路径在变。 */
+  {
+    char lbl[PATH_MAX];
+    nas_url_label(url, lbl, sizeof(lbl));
+    task_update(c->task, TASK_RUNNING, lbl, 0, NULL);
+  }
   if(!nas_source_for(&c->src, url)) {
     snprintf(c->why, sizeof(c->why), "NAS 地址无法解析（写成 主机/共享/路径）");
     return -1;
