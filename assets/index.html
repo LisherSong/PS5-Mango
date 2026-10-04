@@ -1974,13 +1974,13 @@ if (smZipBtn) smZipBtn.addEventListener("click", async () => {
   try {
     /* 第 1 步：流式上传（进度/速度/剩余进任务坞合成行） */
     smOut("smZipOut", "上传 ZIP 中…", null);
-    await apiJson("/api/mkdir", { path: "/data/wfm", name: "incoming" });
-    const zipPath = await smZipStreamUpload(f);
+    const up = await smZipStreamUpload(f);
     dockSyntheticClear();
-    if (!zipPath) {
-      smOut("smZipOut", "导入失败：ZIP 上传中断（网络中断或空间不足）", false);
+    if (!up || !up.ok) {
+      smOut("smZipOut", "导入失败：ZIP 上传失败（" + (up && up.err ? up.err : "网络中断") + "）", false);
       return;
     }
+    const zipPath = up.path;
     /* 第 2 步：服务端从盘上读 ZIP、建 PFS 并签名注册 */
     smOut("smZipOut", "构建 PFS 镜像并签名注册…（ZIP 越大越久，请勿关页）", null);
     const q = new URLSearchParams({ title_id: tid, ps4, dir_name: dir, main_title: mt, path: zipPath }).toString();
@@ -1996,7 +1996,9 @@ if (smZipBtn) smZipBtn.addEventListener("click", async () => {
 });
 
 /* ZIP 流式上传：复用 /api/upload-file 通道（边收边写，无大小上限）。
-   进度 + 速度 + 剩余进任务坞合成行（dockSynthetic）。成功返回落盘路径，失败 null。 */
+   进度 + 速度 + 剩余进任务坞合成行（dockSynthetic）。成功返回 {ok,path}，
+   失败返回 {ok:false,err}——err 优先取服务端 JSON 的 error（409 文件已存在、
+   507 空间不足……都是真实原因，不再一律显示「网络中断或空间不足」）。 */
 function smZipStreamUpload(file) {
   return new Promise(resolve => {
     const xhr = new XMLHttpRequest();
@@ -2004,6 +2006,10 @@ function smZipStreamUpload(file) {
     xhr.setRequestHeader("X-WFM-Dir", encodeURIComponent("/data/wfm/incoming"));
     xhr.setRequestHeader("X-WFM-Name", encodeURIComponent(file.name));
     xhr.setRequestHeader("X-WFM-Size", String(file.size));
+    /* 暂存目录里的同名 ZIP 直接覆盖：导入流程本来就明说「ZIP 保留在 incoming
+       可到文件页删除」，重试/换版本导入若不覆盖，服务端 EEXIST 409 会被
+       当成网络故障。 */
+    xhr.setRequestHeader("X-WFM-Overwrite", "1");
     const t0 = performance.now();
     xhr.upload.onprogress = e => {
       if (!e.lengthComputable || e.total <= 0) return;
@@ -2016,10 +2022,17 @@ function smZipStreamUpload(file) {
       }
       dockSynthetic("导入 " + file.name, fmt(e.loaded) + " / " + fmt(e.total) + extra, pct);
     };
-    xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300
-      ? "/data/wfm/incoming/" + file.name : null);
-    xhr.onerror = () => resolve(null);
-    xhr.onabort = () => resolve(null);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve({ ok: true, path: "/data/wfm/incoming/" + file.name });
+        return;
+      }
+      let err = "HTTP " + xhr.status;
+      try { const j = JSON.parse(xhr.responseText); if (j && j.error) err = j.error; } catch (e) {}
+      resolve({ ok: false, err });
+    };
+    xhr.onerror = () => resolve({ ok: false, err: "网络中断" });
+    xhr.onabort = () => resolve({ ok: false, err: "已取消" });
     xhr.send(file);
   });
 }
@@ -3974,6 +3987,9 @@ function ppUploadOne(file) {
     xhr.setRequestHeader("X-WFM-Dir", encodeURIComponent(PKG_STAGING));
     xhr.setRequestHeader("X-WFM-Name", encodeURIComponent(file.name));
     xhr.setRequestHeader("X-WFM-Size", String(file.size));
+    /* 暂存目录同名 PKG 直接覆盖：上次安装失败/中断的残留留在 incoming，
+       不覆盖的话重试会撞服务端 EEXIST 409，被误报成网络故障。 */
+    xhr.setRequestHeader("X-WFM-Overwrite", "1");
     const t0 = performance.now();
     xhr.upload.onprogress = e => {
       if (!e.lengthComputable || e.total <= 0) return;
@@ -3990,9 +4006,14 @@ function ppUploadOne(file) {
       }
       dockSynthetic("上传 " + file.name, fmt(e.loaded) + " / " + fmt(e.total) + extra, pct);
     };
-    xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300);
-    xhr.onerror = () => resolve(false);
-    xhr.onabort = () => resolve(false);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) { resolve({ ok: true }); return; }
+      let err = "HTTP " + xhr.status;
+      try { const j = JSON.parse(xhr.responseText); if (j && j.error) err = j.error; } catch (e) {}
+      resolve({ ok: false, err });
+    };
+    xhr.onerror = () => resolve({ ok: false, err: "网络中断" });
+    xhr.onabort = () => resolve({ ok: false, err: "已取消" });
     xhr.send(file);
   });
 }
@@ -4023,16 +4044,17 @@ async function ppUploadAndInstall(files) {
   if (!LIVE) { toast("真机下可从这台电脑安装 PKG"); return; }
   ppPick.disabled = true;
   dockOpen();
-  // 暂存目录不存在就建（已存在时报错无妨，忽略结果）
-  await apiJson("/api/mkdir", { path: "/data/wfm", name: "incoming" });
+  /* 暂存目录由服务端上传通道自建（ensure_parent_dirs 建 /data/wfm/incoming
+     整条链），不再靠前端预 mkdir——那个调用只建一层，/data/wfm 不存在时
+     静默失败，正是存档导入「一上传就失败」的前半个坑。 */
   let queued = 0;
   for (const f of files) {
     ppUpStatus.textContent = "上传 " + f.name + "　0%";
     dockSynthetic("上传 " + f.name, "0%", 0);
     const okUp = await ppUploadOne(f);
-    if (!okUp) {
-      ppUpStatus.textContent = "上传失败：" + f.name;
-      dockSynthetic("上传 " + f.name, "上传失败（网络中断或空间不足）", 100);
+    if (!okUp || !okUp.ok) {
+      ppUpStatus.textContent = "上传失败：" + f.name + "（" + (okUp && okUp.err ? okUp.err : "网络中断") + "）";
+      dockSynthetic("上传 " + f.name, "上传失败（" + (okUp && okUp.err ? okUp.err : "网络中断") + "）", 100);
       break;
     }
     /* 上传完成 → 告诉用户文件落在哪，不再「传完了但不知道去哪了」。

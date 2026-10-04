@@ -144,7 +144,7 @@ class Client:
                          {"Content-Type": "application/x-www-form-urlencoded"})
         return st, self.j(st, d)
 
-    def upload(self, dst, name, data, rel=None, size=None):
+    def upload(self, dst, name, data, rel=None, size=None, overwrite=None):
         h = {
             "Content-Type": "application/octet-stream",
             "X-WFM-Dir": encode_uri_component(dst),
@@ -153,6 +153,8 @@ class Client:
         }
         if rel is not None:
             h["X-WFM-Rel"] = encode_uri_component(rel)
+        if overwrite is not None:
+            h["X-WFM-Overwrite"] = overwrite
         st, d = self.raw("POST", "/api/upload-file", data, h)
         return st, self.j(st, d)
 
@@ -400,6 +402,41 @@ def main():
         check("folder upload recreates subtree",
               "kid.txt" in (list_names(c, ROOT + "/folder") or set()),
               "j=%s" % j)
+
+        # ---- 9c. staging upload into a NON-EXISTENT dir chain (真机 bug 回归) ----
+        # 存档 ZIP 导入「一上传就失败」的根因：/api/upload-file 的目标目录
+        # /data/wfm/incoming 首次使用时整条不存在，而 ensure_parent_dirs 只处理
+        # rel 里的子路径（纯文件名时一个目录都不建）→ check_target_writable
+        # 报 "current directory is not writable" → 500 → 前端误报网络故障。
+        # 另外两个配套契约：EEXIST 409 必须带真实 error 文案（前端现在会显示
+        # 它）；X-WFM-Overwrite:1 重传必须成功（ZIP/PKG 暂存同名覆盖）。
+        deep = ROOT + "/wfm/incoming"          # 整条链在宿主夹具里都不存在
+        st, j = c.upload(deep, "PPSA23226.zip", b"PK\x03\x04ZIPBODY")
+        check("upload into a non-existent dir chain creates it (save-import "
+              "first-attempt bug)", st == 200 and j and j.get("ok"),
+              "st=%s j=%s" % (st, j))
+        on_disk = False
+        try:
+            with open(os.path.join(deep, "PPSA23226.zip"), "rb") as f:
+                on_disk = f.read() == b"PK\x03\x04ZIPBODY"
+        except Exception:
+            pass
+        check("staged zip bytes match on disk", on_disk)
+        st, j = c.upload(deep, "PPSA23226.zip", b"PK\x03\x04ZIPBODY2")
+        check("re-upload without overwrite is a real 409 with a real message",
+              st == 409 and j and not j.get("ok")
+              and "exists" in ((j or {}).get("error") or "").lower(),
+              "st=%s j=%s" % (st, j))
+        st, j = c.upload(deep, "PPSA23226.zip", b"PK\x03\x04ZIPBODY3",
+                         overwrite="1")
+        check("re-upload with X-WFM-Overwrite: 1 succeeds (UI retry path)",
+              st == 200 and j and j.get("ok"), "st=%s j=%s" % (st, j))
+        try:
+            with open(os.path.join(deep, "PPSA23226.zip"), "rb") as f:
+                on_disk = f.read() == b"PK\x03\x04ZIPBODY3"
+        except Exception:
+            on_disk = False
+        check("overwrite replaced the staged bytes", on_disk)
 
         # ---- 10. chinese filename round-trip (json_escape codepoint fix) ----
         zh = "测试目录"

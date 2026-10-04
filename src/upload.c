@@ -107,10 +107,14 @@ finish_upload_task(file_task_t *task, task_state_t state, const char *current,
 
 static void
 finish_upload_context_error(upload_context_t *ctx) {
+  /* error_message 必须无条件先填：无 task 的单文件上传（存档 ZIP / PKG 暂存
+   * 都不带 X-WFM-Task-ID）走不到下面的 task 记录，但 HTTP 响应体要拿它当
+   * error 文案 —— 之前 task==NULL 早退导致 409/507 一律回 error:""，
+   * 前端只能显示 HTTP 409 而非「文件已存在」这类真实原因。 */
+  upload_error_message(ctx);
   if(!ctx->task || ctx->task_done) {
     return;
   }
-  upload_error_message(ctx);
   finish_upload_task(ctx->task,
                      ctx->error == ECANCELED ? TASK_CANCELED : TASK_FAILED,
                      ctx->target[0] ? ctx->target : ctx->task->current,

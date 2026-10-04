@@ -180,6 +180,9 @@ ensure_parent_dirs(const char *base, const char *rel) {
   char current[PATH_MAX];
   const char *p = rel;
   size_t base_len;
+  char chain[PATH_MAX];
+  size_t chain_len;
+  size_t i;
 
   if(!relative_path_safe(rel)) {
     return -1;
@@ -187,6 +190,25 @@ ensure_parent_dirs(const char *base, const char *rel) {
   if(strlen(base) >= sizeof(current)) {
     errno = ENAMETOOLONG;
     return -1;
+  }
+  /* base 本身可能整条不存在（首次上传到 /data/wfm/incoming 就是这种形态：
+   * rel 是纯文件名时下面的循环一次都不进，旧实现直接返回 0，目录根本没建，
+   * check_target_writable 随即报 "current directory is not writable"——真机
+   * 存档导入「一上传就失败」的根因）。先把 base 链按 mkdir -p 语义逐级建出来。 */
+  snprintf(chain, sizeof(chain), "%s", base);
+  chain_len = strlen(chain);
+  while(chain_len > 1 && chain[chain_len - 1] == '/') {
+    chain[--chain_len] = 0;
+  }
+  for(i = 1; i <= chain_len; i++) {
+    if(chain[i] == '/' || i == chain_len) {
+      int last = chain[i];
+      chain[i] = 0;
+      if(ensure_copy_dir(chain)) {
+        return -1;
+      }
+      chain[i] = (char)last;
+    }
   }
   strcpy(current, base);
   base_len = strlen(current);
