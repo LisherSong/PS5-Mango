@@ -151,6 +151,30 @@ pkg_install_last_error(void) {
   return g_last_error;
 }
 
+/* Install-phase forensics: same discipline as the save-delete log that cracked
+ * the six-crash mystery. A failed install surfaces only a 2.4s toast on the
+ * real machine; this file is what survives. Every phase transition appends one
+ * line (fopen/fclose each time, so a kernel panic cannot lose the last line).
+ * WFM_INSTALL_LOG relocates it for host runs. Failures to write are ignored:
+ * the log is forensics, never a dependency. */
+static void
+install_log(const char *fmt, ...) {
+  const char *path = getenv("WFM_INSTALL_LOG");
+  char default_path[] = "/data/nexus-install.log";
+  FILE *f;
+  va_list ap;
+
+  if(!path || !*path) path = default_path;
+  f = fopen(path, "a");
+  if(!f) return;
+  fprintf(f, "[%llu] ", (unsigned long long)time(NULL));
+  va_start(ap, fmt);
+  vfprintf(f, fmt, ap);
+  va_end(ap);
+  fputc('\n', f);
+  fclose(f);
+}
+
 /* --- readiness -------------------------------------------------------------
  * Judgment is by path, never by memory: a one-click package may have injected
  * the payload without the user ever "installing" anything. */
@@ -222,6 +246,7 @@ pkg_install_begin(const char *pkg_path) {
   g_last_error = NULL;
 
   if(!pkg_path || !*pkg_path) { g_last_error = "no package path"; return NULL; }
+  install_log("begin path=%s", pkg_path);
   /* Judgment is by whether the kernel call WORKS, not by marker files: loaders
    * differ in what traces they leave (the user's kstuff was active yet neither
    * /proc/kstuff nor the autoloader marker existed, and install was refused
@@ -234,8 +259,10 @@ pkg_install_begin(const char *pkg_path) {
       ? "could not raise AuthID to 0x4800000000000006"
       : "kstuff is not running (no /proc/kstuff, no autoloader marker; "
         "kernel AuthID raise failed)";
+    install_log("authid FAILED (kstuff_ready=%d) -> abort", kstuff_ready());
     return NULL;
   }
+  install_log("authid ok");
 
   h = calloc(1, sizeof(*h));
   if(!h) { g_last_error = "out of memory"; return NULL; }
@@ -266,6 +293,7 @@ pkg_install_begin(const char *pkg_path) {
   if(already_installed(h->title_id)) {
     h->finished = 1;
     set_note(h, "already installed (%s) — skipped", h->title_id);
+    install_log("precheck already-installed tid=%s -> skip (done)", h->title_id);
     return h;
   }
 
@@ -273,11 +301,13 @@ pkg_install_begin(const char *pkg_path) {
    * on /data is not something its installer can open. */
   if(pkg_stream_start() != 0) {
     set_note(h, "could not start the loopback stream server");
+    install_log("stream start FAILED -> abort");
     return h;
   }
   pkg_stream_make_session(h->session, sizeof(h->session));
   if(pkg_stream_url(h->uri, sizeof(h->uri), h->session) != 0) {
     set_note(h, "could not build the stream uri");
+    install_log("stream uri FAILED -> abort");
     return h;
   }
   if(pkg_stream_publish(h->session, pkg_path, 0) != 0) {
@@ -285,12 +315,15 @@ pkg_install_begin(const char *pkg_path) {
      * not discovered by the console as a mid-stream stall it reports as a
      * generic install error. */
     set_note(h, "cannot read the package: %s", pkg_path);
+    install_log("publish FAILED path=%s -> abort", pkg_path);
     return h;
   }
   h->session_open = 1;
+  install_log("stream up uri=%s", h->uri);
 
   if(sceAppInstUtilInitialize() != 0) {
     set_note(h, "sceAppInstUtilInitialize failed");
+    install_log("Initialize FAILED -> abort");
     pkg_stream_unpublish();
     h->session_open = 0;
     return h;
@@ -308,6 +341,8 @@ pkg_install_begin(const char *pkg_path) {
 
   {
     int r = sceAppInstUtilInstallByPackage(&h->meta, &h->info, &h->playgo);
+    install_log("InstallByPackage rc=0x%08X content_id=%s", (unsigned)r,
+                h->info.content_id[0] ? h->info.content_id : "(none)");
     if(r != 0) {
       set_note(h, "InstallByPackage failed (0x%08X)", (unsigned)r);
       sceAppInstUtilTerminate();
@@ -381,6 +416,9 @@ pkg_install_poll(pkg_install_handle_t *h, int *percent) {
              "installer reported \"%s\" (error 0x%08X)",
              st.status[0] ? st.status : "error",
              (unsigned)st.error_info.error_code);
+    install_log("poll FAILED status=%s err=0x%08X pct=%d",
+                st.status[0] ? st.status : "error",
+                (unsigned)st.error_info.error_code, h->last_percent);
     h->finished = 1;
     return NEXUS_ERR_GENERIC;
   }
@@ -393,6 +431,8 @@ pkg_install_poll(pkg_install_handle_t *h, int *percent) {
   *percent = h->last_percent;
 
   if(!strcmp(st.status, "playable") || !strcmp(st.status, "completed")) {
+    install_log("poll DONE status=%s pct=%d", st.status,
+                (int)((st.downloaded_size * 100) / (st.total_size ? st.total_size : 1)));
     h->last_percent = 100;
     *percent = 100;
     h->finished = 1;

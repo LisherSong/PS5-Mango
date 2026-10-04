@@ -1875,10 +1875,21 @@ stem_of(const char *path, char *out, size_t outsz) {
 typedef struct {
   strbuf_t *b;
   int first;
+  strbuf_t *unreadable;   /* roots opendir() could not open (depth 0 only) */
+  int unreadable_first;
 } scan_out_t;
 
 static void
 scan_dir(const char *dir, scan_out_t *out, int depth);
+
+static void
+scan_note_unreadable(scan_out_t *out, const char *root) {
+  if(!out->unreadable) return;
+  if(!out->unreadable_first) strbuf_append(out->unreadable, ",");
+  out->unreadable_first = 0;
+  /* json_escape 自带首尾引号（见 json_util.c），这里不要再手动包。 */
+  json_escape(out->unreadable, root);
+}
 
 static void
 scan_emit(const char *full, const char *name, const struct stat *st, scan_out_t *out) {
@@ -1918,7 +1929,13 @@ scan_dir(const char *dir, scan_out_t *out, int depth) {
   struct dirent *ent;
 
   if(depth > PKG_SCAN_MAX_DEPTH) return;
-  if(!(d = opendir(dir))) return;
+  if(!(d = opendir(dir))) {
+    /* 只记顶层根目录的失败：子目录权限/不存在是常态（递归里报会淹没真信号）。
+     * 根目录打不开时前端要能区分「目录里没有 PKG」和「目录根本读不了」——
+     * 真机上 /data/pkg 大小写拼错就是这种形态。 */
+    if(depth == 0) scan_note_unreadable(out, dir);
+    return;
+  }
   while((ent = readdir(d))) {
     char full[PATH_MAX];
     struct stat st;
@@ -1939,6 +1956,7 @@ enum MHD_Result
 api_pkg_scan(struct MHD_Connection *conn, const char *body, size_t body_size) {
   char *root = req_param(conn, body, body_size, "root");
   strbuf_t b = {0};
+  strbuf_t unreadable = {0};
   scan_out_t out;
 
   if(!root || !*root) {
@@ -1948,8 +1966,13 @@ api_pkg_scan(struct MHD_Connection *conn, const char *body, size_t body_size) {
   strbuf_append(&b, "{\"ok\":true,\"packages\":[");
   out.b = &b;
   out.first = 1;
+  out.unreadable = &unreadable;
+  out.unreadable_first = 1;
   scan_dir(root, &out, 0);
+  strbuf_append(&b, "],\"unreadable\":[");
+  strbuf_append(&b, unreadable.data ? unreadable.data : "");
   strbuf_append(&b, "]}");
+  free(unreadable.data);
   free(root);
   return send_buffer(conn, MHD_HTTP_OK, b.data, "application/json");
 }

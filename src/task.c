@@ -85,12 +85,19 @@ free_task(file_task_t *task) {
 void
 remove_finished_tasks_locked(void) {
   file_task_t **link = &g_tasks;
+  time_t now = time(NULL);
 
   while(*link) {
     file_task_t *task = *link;
 
+    /* 安装任务终态后多留 10 分钟：失败原因（AuthID / 环回流 / InstallByPackage
+     * 的原话）只存在于 task->error，之前终态帧被 /api/tasks 报告一次就摘除——
+     * 真机上表现为「进度条一闪就没了」，用户既没看清 toast 也无处回查。留在
+     * 列表里让任务视图和任务坞持续可读；/api/install/poll 的按 id 查询也因
+     * 此能查到刚终态的任务（比只等一帧更稳）。 */
     if(task_is_active(task) || task->active_streams ||
-       (task->op == TASK_PKG_INSTALL && !task->reported)) {
+       (task->op == TASK_PKG_INSTALL &&
+        (!task->reported || now - task->updated_at < 600))) {
       link = &task->next;
       continue;
     }

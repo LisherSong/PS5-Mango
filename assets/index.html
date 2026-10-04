@@ -3402,7 +3402,9 @@ document.querySelectorAll("#view-tasks .focus .acts button").forEach(b => {
 
 /* ---- 轻提示 ---- */
 let toastTimer = 0;
-function toast(msg) {
+/* ms 可选：安装失败这类带关键原因（AuthID / InstallByPackage 原话）的提示
+   要给足阅读时间——2.4s 一闪而过，用户就只能看到「进度条一闪就没了」。 */
+function toast(msg, ms) {
   const t = document.getElementById("toast");
   if (!t) return;
   t.textContent = msg;
@@ -3412,7 +3414,7 @@ function toast(msg) {
   toastTimer = setTimeout(() => {
     t.classList.remove("on");
     setTimeout(() => { t.hidden = true; }, 220);
-  }, 2400);
+  }, Number(ms) > 0 ? Number(ms) : 2400);
 }
 
 /* ---- /api/pkg/scan → 封面网格 ---- */
@@ -3466,7 +3468,13 @@ function libCard(p) {
    —— 后端 pkg_lib_scan() 本来就递归（≤12 层），缺的只是前端只喂了一个路径。
    不存在的目录 scan_dir() 的 opendir 会失败并返回空集，不报错，所以可以无脑全试。
    用 /data 下的具体子目录而不是整个 /data：/data 是 PFS，递归全扫代价大且几乎不会有 PKG。 */
-const LIB_SCAN_ROOTS = ["/mnt/ext1/games", "/mnt/usb0", "/mnt/usb1", "/data/pkg"];
+/* 扫描根：/data/pkg 大小写两种拼写都查（真机上用户手建目录常是大写 PKG，
+   PS5 文件系统大小写敏感 ⇒ 小写根扫不到就永远「扫描不到」）；暂存目录
+   /data/wfm/incoming 也扫——从 PC 传完的 PKG 直接变成带「安装」按钮的卡片，
+   不再「传上去了但不知道去哪了」。大小写不敏感的 FS 上两个拼写会返回同一
+   批文件，renderLibrary 用小写 path 去重，不会出双卡。 */
+const LIB_SCAN_ROOTS = ["/mnt/ext1/games", "/mnt/usb0", "/mnt/usb1",
+  "/data/pkg", "/data/PKG", "/data/wfm/incoming"];
 
 /* 从 PC 连接扫到的包（serve-pkg /catalog）—— 用户点名：它们应该显示在
  * PKG 管理页面里，而不是锁在「从 PC 安装」的小弹窗中。ppConnect 成功后把
@@ -3496,15 +3504,26 @@ async function renderLibrary() {
   const box = document.getElementById("libCovers");
   const count = document.getElementById("libCount");
   if (!box) return;
+  /* 去重键用小写 path：/data/pkg 与 /data/PKG 两个拼写扫出的是同一批文件
+     （大小写不敏感 FS），小写合并才不会出双卡；大小写敏感 FS 下只有一个
+     拼写有结果，天然不重复。 */
   const seen = new Set(), pkgs = [];
-  let firstErr = null;
+  let firstErr = null, unreadable = [];
   for (const root of LIB_SCAN_ROOTS) {
     const j = await apiPost("/api/pkg/scan", { root });
     if (!j || !j.ok) { if (!firstErr) firstErr = (j && j.error) || "服务不可用"; continue; }
+    for (const u of (j.unreadable || [])) {
+      if (u && !unreadable.includes(u)) unreadable.push(u);
+    }
     for (const p of (j.packages || [])) {
-      if (p && p.path && !seen.has(p.path)) { seen.add(p.path); pkgs.push(p); }
+      const key = String(p && p.path || "").toLowerCase();
+      if (p && p.path && !seen.has(key)) { seen.add(key); pkgs.push(p); }
     }
   }
+  /* 打不开的根目录如实列出（大小写拼错 / 无 USB 是常态）——用户据此知道
+     「扫描不到」是目录问题而不是没有 PKG。USB 两个根几乎总是缺省，从提示
+     里排除掉，避免每次都刷两条无意义噪音。 */
+  unreadable = unreadable.filter(u => !/^\/mnt\/usb[01]$/.test(u));
   if (!pkgs.length && firstErr && !pcCatalog.length) {
     box.innerHTML = '<div class="note" style="grid-column:1/-1;color:var(--fg3)">扫描失败：'
       + esc(firstErr) + "</div>";
@@ -3513,7 +3532,9 @@ async function renderLibrary() {
   }
   if (!pkgs.length && !pcCatalog.length) {
     box.innerHTML = '<div class="note" style="grid-column:1/-1;color:var(--fg3)">'
-      + "没有扫描到 PKG / fPKG 镜像（已查 M.2 games、USB /mnt/usb0|1、/data/pkg）</div>";
+      + "没有扫描到 PKG / fPKG 镜像（已查 M.2 games、USB、/data/pkg、暂存 incoming）"
+      + (unreadable.length ? "<br>打不开的目录（路径不对或无权限）：" + esc(unreadable.join("、")) : "")
+      + "</div>";
     if (count) count.textContent = "0 个";
     return;
   }
@@ -3681,8 +3702,11 @@ function pollInstall(id, title, isFpkg) {
       toast(verb === "复制" ? "已复制到 homebrew：" + nm : "安装完成：" + nm);
     } else if (t.state_name === "failed") {
       /* note 现在是服务端/系统安装器的原话（kstuff 未运行、InstallByPackage
-         0x… 等），照实转达 —— 不再是笼统的「安装失败」而查不到原因。 */
-      toast(verb + "失败：" + (t.note || nm));
+         0x… 等），照实转达 —— 不再是笼统的「安装失败」而查不到原因。
+         给 6 秒：原因就是下一步排查的全部线索，2.4s 一闪用户只能看到
+         「进度条一闪就没了」（真机 2026-10-04 反馈原话）。任务坞里那行
+         失败任务会保留 10 分钟，可回看。 */
+      toast(verb + "失败：" + (t.note || nm), 6000);
     } else {
       toast(verb + "已取消：" + nm);
     }

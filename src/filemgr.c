@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2710,6 +2711,27 @@ api_chmod(struct MHD_Connection *conn, const char *body, size_t body_size) {
 }
 
 #ifndef __linux__
+/* 与 pkg_installer.c 的 install_log 同一落点（/data/nexus-install.log）：
+ * worker 层只记终态与句柄去向，阶段细节归 pkg_installer.c。fopen/fclose
+ * 逐行落盘，任何崩溃都保得住上一行；写失败静默 —— 取证不成为依赖。 */
+static void
+pkg_task_log(const char *fmt, ...) {
+  const char *path = getenv("WFM_INSTALL_LOG");
+  char default_path[] = "/data/nexus-install.log";
+  FILE *f;
+  va_list ap;
+
+  if(!path || !*path) path = default_path;
+  f = fopen(path, "a");
+  if(!f) return;
+  fprintf(f, "[%llu] ", (unsigned long long)time(NULL));
+  va_start(ap, fmt);
+  vfprintf(f, fmt, ap);
+  va_end(ap);
+  fputc('\n', f);
+  fclose(f);
+}
+
 static file_task_t *
 next_pkg_task_locked(void) {
   file_task_t *task;
@@ -2751,6 +2773,8 @@ pkg_task_worker(void *arg) {
       /* Nothing was started: kstuff missing, no authid, unreadable package. The
        * reason is specific and actionable, so it goes to the user verbatim. */
       note = pkg_install_last_error();
+      pkg_task_log("task %lu FAILED at begin: %s", task->id,
+                   note ? note : "(no reason)");
       task_set_error_code(task, "pkg_install_failed", note);
       task_update(task, TASK_FAILED, task->src, 0,
                   note ? note : "package installation failed");
@@ -2779,8 +2803,12 @@ pkg_task_worker(void *arg) {
         continue;
       }
       if(err == NEXUS_OK) {
+        pkg_task_log("task %lu DONE note=%s", task->id,
+                     note ? note : "-");
         task_update(task, TASK_DONE, task->src, 0, note);
       } else {
+        pkg_task_log("task %lu FAILED note=%s", task->id,
+                     note ? note : "(no reason)");
         task_set_error_code(task, "pkg_install_failed",
                             note ? note : "package installation failed");
         task_update(task, TASK_FAILED, task->src, 0,

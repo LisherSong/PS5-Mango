@@ -874,6 +874,13 @@ def main():
               "state=%s" % (ok_state or {}).get("state_name"))
         st, j = c.api_post("/api/pkg/scan", {"root": ROOT})
         check("POST /api/pkg/scan ok (empty)", j and j.get("ok"), "j=%s" % j)
+        # 根目录打不开必须上报（unreadable），不能静默当成"没有 PKG"——
+        # 真机上 /data/pkg 大小写拼错就是这种形态，之前表现为「扫描不到」。
+        st, j = c.api_post("/api/pkg/scan", {"root": ROOT + "/definitely-missing"})
+        check("pkg/scan reports an unreadable root instead of a silent empty set",
+              j and j.get("ok")
+              and (j.get("unreadable") or []) == [ROOT + "/definitely-missing"],
+              "j=%s" % j)
         st, j = c.api_post("/api/app/register", {})
         # PS5-only; on the host it must be a clean, routed error (never 404/405).
         check("POST /api/app/register routed (PS5-only on host)",
