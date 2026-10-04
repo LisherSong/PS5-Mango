@@ -328,6 +328,7 @@ pkg_install_begin(const char *pkg_path) {
     h->session_open = 0;
     return h;
   }
+  install_log("Initialize ok");
 
   /* Discipline 2: icon_url is an empty string, NOT NULL and not a URL. */
   h->meta.uri                = h->uri;
@@ -340,7 +341,13 @@ pkg_install_begin(const char *pkg_path) {
   memset(&h->playgo, 0, sizeof(h->playgo));
 
   {
-    int r = sceAppInstUtilInstallByPackage(&h->meta, &h->info, &h->playgo);
+    int r;
+    /* 写在调用之前：InstallByPackage 若在内部 fault（真机已发生过一次
+     * 「点安装进程就没了」），这行就是最后遗言——上一轮日志只写调用后的
+     * rc，进程死在里面时 rc 行永远不出现，无法与 Initialize 之死区分。 */
+    install_log("calling InstallByPackage uri=%s name=%s",
+                h->uri, h->display_name);
+    r = sceAppInstUtilInstallByPackage(&h->meta, &h->info, &h->playgo);
     install_log("InstallByPackage rc=0x%08X content_id=%s", (unsigned)r,
                 h->info.content_id[0] ? h->info.content_id : "(none)");
     if(r != 0) {

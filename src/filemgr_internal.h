@@ -77,6 +77,23 @@ extern file_task_t *g_tasks;
 extern unsigned long g_next_task_id;
 extern unsigned short g_listen_port;
 
+/* Task threads run deep code on purpose: recursive tree walks (save restore,
+ * NAS pulls) and native installer calls (sceAppInstUtilInstallByPackage) whose
+ * internal frames we cannot see. The payload's default pthread stack is small
+ * (FreeBSD heritage), and an overflow does not return an error — the whole
+ * process just vanishes, exactly the "clicked install, process gone" death.
+ * See the NEXUS_SAVE_MAX_DEPTH note in nexus_port.c for the earlier encounter.
+ * One explicit size for every task-executing thread. 2 MiB: the native
+ * installer call chain (sceAppInstUtilInstallByPackage) has frames we cannot
+ * see, and stack pages are committed on demand, so headroom is free. */
+static inline int
+task_thread_create(pthread_t *t, void *(*fn)(void *), void *arg) {
+  pthread_attr_t a;
+  pthread_attr_init(&a);
+  pthread_attr_setstacksize(&a, 2048u * 1024u);
+  return pthread_create(t, &a, fn, arg);
+}
+
 const char *task_op_name(task_op_t op);
 const char *task_state_name(task_state_t state);
 int task_is_active(const file_task_t *task);

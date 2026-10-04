@@ -187,6 +187,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 @media (max-width:1240px){
   #chipHttp .st{display:none}
   #chipHttp{padding:0 9px}
+  #chipVer{display:none!important}
 }
 /* 本机地址：PS5 自己没有 ipconfig，而「用电脑 / 手机打开同一个界面」必然要手打这个地址
    ⇒ 必须常驻页首并能一键复制；藏进设置抽屉等于没有。
@@ -200,6 +201,12 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .ipchip:hover{background:var(--ghost-hover);border-color:var(--line-strong);color:var(--fg)}
 .ipchip[data-copied]{background:var(--ok-soft);border-color:var(--ghost-line);color:var(--ok)}
 .ipchip[data-copied] .i{color:var(--ok)}
+/* 版本牌：跟着品牌走的等宽小字，视觉上要比 IP 胶囊更退后 —— 版本是「核对用的」不是
+   「操作用的」。窄屏（≤1240px）随状态胶囊一起收掉：900px 顶栏单行 64px 是实测守过的
+   底线，版本号在这预算里排不进去。!important 是必须的：显示走内联 style.display，
+   作者规则不抬优先级就压不过内联。 */
+#chipVer{font-family:var(--mono);font-size:calc(11.5px*var(--ui));color:var(--fg3);
+  padding:0 calc(8px*var(--ui));gap:0}
 /* 按钮走全圆角胶囊（2026-10-02 参考 DSH 按钮样式：icon+文字、细边、stadium 形） */
 /* 🪤 `<a class="btn">` 也必须长得像按钮 —— PC 端弹出的两个下载链接就是 `<a>`：
    UA 样式表给 `a:-webkit-any-link` 上了「链接蓝 + 下划线」，而**作者规则永远压过 UA 规则**
@@ -963,6 +970,11 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 <header class="top">
   <div class="wrap topbar">
     <span class="brand"><img class="mark" src="/icon0.png" alt="" width="30" height="30">PS5 Nexus</span>
+    <!-- 版本牌：值来自 /api/status 的 "version"（运行中二进制自己的 -DVERSION_TAG），
+         非 live（file:// 静态预览）没有服务端可问 ⇒ 保持隐藏，不造假版本号。
+         ⚠️ .chip 是显式 display:inline-flex，hidden 属性压不住它 —— 显示切换必须走
+         style.display（老坑：.stats div 的 display:flex 覆盖 hidden 就是同一类事故）。 -->
+    <span class="chip" id="chipVer" style="display:none"></span>
     <nav class="nav" id="nav" aria-label="一级导航">
       <button data-view="files" aria-current="true">文件</button>
       <button data-view="library">PKG管理</button>
@@ -2393,6 +2405,14 @@ function applyStatus(s) {
     const v = ip.querySelector(".ipv");
     if (v && v.textContent === "192.168.1.42:2026") v.textContent = host;  // 只覆盖播种值，不碰复制中的临时文案
     ip.title = "本机地址 · 点击复制 http://" + host + "/";
+  }
+  /* 版本牌：/api/status 的 version 就是运行中 ELF 的 -DVERSION_TAG，服务端已上报
+     （hosttest.py 断言在钉），这里只负责显示；没有该字段的旧后端就保持隐藏。 */
+  const ver = document.getElementById("chipVer");
+  if (ver && s.version) {
+    ver.textContent = s.version;
+    ver.title = "运行中的版本 · " + s.version;
+    ver.style.display = "";
   }
   const role = (k, on, text) => {
     const r = document.querySelector('#view-tasks .kv .r[data-role="' + k + '"]');

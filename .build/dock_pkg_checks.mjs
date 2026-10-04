@@ -237,6 +237,58 @@ console.log("【5】安装失败提示的可读性（toast 时长、6 秒失败�
   })(), "反证：toast 的 ms 参数被摘掉 ⇒ 正向标记消失（断言能红）");
 }
 
+/* ---------- ⑥ 版本牌：/api/status.version → #chipVer（vm 级） ---------- */
+console.log("【6】版本牌：applyStatus 消费 /api/status 的 version 字段");
+{
+  /* 静态底座：牌子在顶栏品牌旁、以 display:none 起步（.chip 是显式 inline-flex，
+     hidden 属性压不住 —— .stats div 的前车之鉴）；窄屏随 1240px 断点折叠。 */
+  ok(/<span class="chip" id="chipVer" style="display:none"><\/span>/.test(src),
+     "顶栏品牌旁有 #chipVer（内联 display:none 起步，不造假版本号）");
+  ok(/#chipVer\{font-family:var\(--mono\)[^}]*\}/.test(src) &&
+     /#chipVer\{display:none!important\}/.test(src),
+     "版本牌样式：等宽小字 + 窄屏 ≤1240px 随状态胶囊一起折叠");
+
+  const code = cut(/function applyStatus\(s\)\s*\{[\s\S]*?\n\}/, "applyStatus");
+  const mk = (mutate) => {
+    const el = () => ({ textContent: "", title: "", style: {}, dataset: {},
+                        querySelector: () => null });
+    const els = { chipHttp: el(), ipChip: el(), chipVer: el() };
+    const ctx = {
+      document: {
+        getElementById: id => els[id] || null,
+        querySelector: () => null,
+      },
+    };
+    vm.createContext(ctx);
+    vm.runInContext(mutate ? mutate(code) : code, ctx);
+    return { els,
+             run: s => vm.runInContext(`applyStatus(${JSON.stringify(s)})`, ctx) };
+  };
+
+  const a = mk();
+  a.run({ ok: true, http: true, port: 2026, addr: "192.168.1.42", version: "v1.0.0" });
+  ok(a.els.chipVer.textContent === "v1.0.0" &&
+     a.els.chipVer.style.display === "",
+     "带 version 的 status：牌子上版本号、display 置空（显示）");
+
+  const b = mk();
+  b.run({ ok: true, http: true, port: 2026, addr: "192.168.1.42" });
+  ok(b.els.chipVer.textContent === "",
+     "旧后端无 version 字段：牌子保持隐藏，不渲染 undefined");
+
+  const c = mk();
+  c.run({ ok: false, version: "v9.9.9" });
+  ok(c.els.chipVer.textContent === "",
+     "!s.ok 早退：不碰牌子（状态不可信时版本也不可信）");
+
+  /* 反证：摘掉 textContent 赋值 ⇒ 版本号不再上牌（断言能红）。
+     ⚠️ index.html 是 CRLF 行尾，替换串本身不含换行，无 \r?\n 问题。 */
+  const d = mk(code2 => code2.replace("ver.textContent = s.version;", ""));
+  d.run({ ok: true, http: true, port: 2026, addr: "192.168.1.42", version: "v1.0.0" });
+  ok(d.els.chipVer.textContent === "",
+     "反证：textContent 赋值被摘掉 ⇒ 牌子空着（断言能红）");
+}
+
 /* ---------- 收尾：等所有异步段落跑完再统一报告退出 ----------
    原 exit 在【2】的 IIFE 末尾；新增的异步段会被它提前 process.exit 杀死。 */
 (async () => {

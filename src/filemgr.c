@@ -2092,7 +2092,7 @@ create_task_response(struct MHD_Connection *conn, task_op_t op,
   g_tasks = task;
   pthread_mutex_unlock(&g_tasks_lock);
 
-  if(pthread_create(&task->thread, NULL, task_worker, task)) {
+  if(task_thread_create(&task->thread, task_worker, task)) {
     task_update(task, TASK_FAILED, NULL, 0, "pthread_create failed");
   } else {
     pthread_detach(task->thread);
@@ -2660,7 +2660,7 @@ api_extract(struct MHD_Connection *conn, const char *body, size_t body_size) {
     g_tasks = task;
     pthread_mutex_unlock(&g_tasks_lock);
 
-    if(pthread_create(&task->thread, NULL, task_worker, task)) {
+    if(task_thread_create(&task->thread, task_worker, task)) {
       task_update(task, TASK_FAILED, NULL, 0, "pthread_create failed");
     } else {
       pthread_detach(task->thread);
@@ -2864,7 +2864,7 @@ enqueue_pkg_tasks(char **paths, size_t count, unsigned long *ids) {
 
   pthread_mutex_lock(&g_tasks_lock);
   if(!g_pkg_worker_started) {
-    result = pthread_create(&g_pkg_worker_thread, NULL, pkg_task_worker, NULL);
+    result = task_thread_create(&g_pkg_worker_thread, pkg_task_worker, NULL);
     if(!result) {
       pthread_detach(g_pkg_worker_thread);
       g_pkg_worker_started = 1;

@@ -19,6 +19,13 @@ ps5-obj/
 # Whitelist: the front-end acceptance harness (vm-level checks pinned to
 # assets/index.html) is a real deliverable, not scratch.
 !.build/dock_pkg_checks.mjs
+# Deep-tree save backup crash repro (SIGSEGV at copy_tree_r depth 13, the
+# 68KB-frame LTO-inlining regression). One-liner triage for future stack
+# regressions: wsl.exe -d Ubuntu-22.04 bash .build/repro-deep-backup.sh
+!.build/repro-deep-backup.sh
+# hosttest.py points WFM_SAVE_LOG at the repo root and re-creates it on every
+# run; it is a per-run forensics dump, never a deliverable.
+save-delete.log
 
 # ---- pre-rename artifacts -----------------------------------------------
 # Kept listed so an old binary lying around cannot be mistaken for a fresh

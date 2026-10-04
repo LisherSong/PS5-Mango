@@ -24,7 +24,7 @@ endif
 # defeats make's "CFLAGS changed but nothing depends on it" staleness — a plain
 # VERSION_TAG edit alone would silently reuse every stale object and link a
 # binary that still reports the old version.
-VERSION_TAG := v1.0.0
+VERSION_TAG := v1.0.1
 # ⚠️ TITLE_ID MUST match "titleId" in assets/param.json. app_installer.c uses
 # TITLE_ID to create /user/app/<id>, but the PS5 launcher reads the title id out
 # of the param.json we drop beside it; if they disagree the app is installed

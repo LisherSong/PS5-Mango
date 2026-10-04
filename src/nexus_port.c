@@ -50,12 +50,18 @@
 static void save_debug_log(const char *fmt, ...);
 
 /* Atomic single-file copy: land into a temp name + rename, so a crash never
- * leaves a half-written destination. Returns 0 on success. */
+ * leaves a half-written destination. Returns 0 on success.
+ * ⚠️ The 64 KiB copy buffer is HEAP, never `char buf[65536]` on the stack:
+ *   -O2 -flto inlines this function into copy_tree_r, and an on-stack buffer
+ *   would then ride along in EVERY recursion frame (measured 0x11000+0xc8 ≈
+ *   68 KiB/frame). With the 2 MiB task-thread stack that dies at depth 13 —
+ *   deterministic SIGSEGV, whole process gone (host-test regression, pinned
+ *   by hosttest 15b). Heap keeps the recursion frame at ~12 KiB. */
 static int
 copy_file_atomic(const char *src, const char *dst) {
   char temp[PATH_MAX];
   FILE *in = NULL, *out = NULL;
-  char buf[65536];
+  char *buf;
   size_t n;
   int ret = -1;
   int fd = -1;
@@ -65,11 +71,12 @@ copy_file_atomic(const char *src, const char *dst) {
     return -1;
   }
   snprintf(temp, sizeof(temp), "%s.wfm-port-%ld.tmp", dst, (long)getpid());
-  if(!(in = fopen(src, "rb"))) return -1;
+  if(!(buf = malloc(65536))) return -1;
+  if(!(in = fopen(src, "rb"))) { free(buf); return -1; }
   if((fd = open(temp, O_WRONLY | O_CREAT | O_EXCL, 0600)) < 0) goto done;
   if(!(out = fdopen(fd, "wb"))) goto done;
   fd = -1;
-  while((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+  while((n = fread(buf, 1, 65536, in)) > 0) {
     if(fwrite(buf, 1, n, out) != n) goto done;
   }
   if(ferror(in)) goto done;
@@ -82,6 +89,7 @@ done:
   if(out) fclose(out);
   if(fd >= 0) close(fd);
   if(in) fclose(in);
+  free(buf);
   if(ret) unlink(temp);
   return ret;
 }
@@ -106,12 +114,12 @@ mkdir_p(const char *path) {
 }
 
 /* ---- 存档树递归的深度上限 ----------------------------------------------
- * 🪤 copy_tree **原先没有深度上限**，而同仓的 NAS(NEXUS_NAS_MAX_DEPTH 32)、
- * PKG(12)、RAR(128) 全都有。为什么要命：每帧栈占用 copy_tree = 2×PATH_MAX(8KB)，
- * 而本仓**全局没有任何 pthread_attr_setstacksize** ⇒ 任务线程吃默认栈。深层嵌套
- * 一旦把栈撑爆 → SIGSEGV → 整个进程没；PS5 无 service manager，进程退出
- * 没人拉起（只能重新投 payload）。栈溢出不会返回错误码，只会让进程消失。
- * 上限取 32 与 NAS 侧一致：真实存档嵌套远小于此，纯属兜底。
+ * 🪤 深层嵌套把栈撑爆 → SIGSEGV → 整个进程没；PS5 无 service manager，进程
+ * 退出没人拉起（只能重新投 payload）。栈溢出不会返回错误码，只会让进程消失。
+ * 现在有两层防线：任务线程显式 2 MiB 栈（task_thread_create）+ 这里的深度帽。
+ * ⚠️ 帽子按帧预算算：帧 ~12KB（copy_file_atomic 的 64KB 缓冲已挪堆，见其
+ *   注释——曾被 -flto 内联进本函数，每帧 68KB，1MiB 栈只活到 13 层），
+ *   32 层 ≈ 400KB << 2 MiB。再往 copy_tree_r 塞大栈缓冲前先重算这里。
  * （删除/计数递归已移除：删除改走 filemgr_delete_run()，见 save_delete_worker。） */
 #define NEXUS_SAVE_MAX_DEPTH 32
 
@@ -261,7 +269,7 @@ queue_task_ex(task_op_t op, const char *src, const char *dst, const char *label,
   g_tasks = task;
   pthread_mutex_unlock(&g_tasks_lock);
 
-  if(pthread_create(&task->thread, NULL, fn, task)) {
+  if(task_thread_create(&task->thread, fn, task)) {
     task_update(task, TASK_FAILED, NULL, 0, "pthread_create failed");
   } else {
     pthread_detach(task->thread);
