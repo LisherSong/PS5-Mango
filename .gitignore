@@ -12,7 +12,10 @@ ps5-obj/
 # ---- local scratch -------------------------------------------------------
 # Host-test sandboxes, fixtures, backups and screenshots. Never publish: the
 # backups alone are tens of MB and they contain point-in-time copies of src/.
-.build/
+# NOTE: ignore the CONTENTS (.build/*), not the directory itself — git never
+# descends into an excluded directory, so "!.build/x" on top of ".build/"
+# can never re-include anything.
+.build/*
 # Whitelist: the front-end acceptance harness (vm-level checks pinned to
 # assets/index.html) is a real deliverable, not scratch.
 !.build/dock_pkg_checks.mjs
