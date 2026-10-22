@@ -1,10 +1,13 @@
 #include "path_util.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 char *
 query_value(struct MHD_Connection *conn, const char *key) {
@@ -111,7 +114,7 @@ body_form_value(const char *body, size_t body_size, const char *key) {
   return NULL;
 }
 
-/* ---- JSON body parsing (for the NEXUS front-end's application/json posts) ---- */
+/* ---- JSON body parsing (for the MANGO front-end's application/json posts) ---- */
 
 static void
 json_skip_ws(const char **pp, const char *end) {
@@ -306,7 +309,7 @@ body_json_value(const char *body, size_t body_size, const char *key) {
     free(k);
     json_skip_ws(&p, end);
     /* Advance past the pair separator. Without this the loop stops after the
-     * first key and every later key is invisible — the NEXUS front-end posts
+     * first key and every later key is invisible — the MANGO front-end posts
      * multi-key objects (e.g. {scheme,path} / {paths,dst}), so dropping the
      * comma silently turned into "path missing" / "invalid mode". */
     if(p < end && *p == ',') {
@@ -613,4 +616,43 @@ fs_path_value(char *path) {
   out[pos] = 0;
   free(path);
   return out;
+}
+
+int
+path_remove_tree(const char *path) {
+  struct stat st;
+  DIR *d;
+  struct dirent *ent;
+  int rc = 0;
+
+  if(!path || !*path) {
+    return -1;
+  }
+  /* lstat, not stat: a symlink to a directory must be unlinked, never walked.
+     That is also what makes this loop cycle-proof without a visited set. */
+  if(lstat(path, &st)) {
+    return errno == ENOENT ? 0 : -1;      /* already gone = job done */
+  }
+  if(!S_ISDIR(st.st_mode)) {
+    if(unlink(path) && errno != ENOENT) {
+      return -1;
+    }
+    return 0;
+  }
+  if(!(d = opendir(path))) {
+    return errno == ENOENT ? 0 : -1;
+  }
+  while((ent = readdir(d))) {
+    char child[PATH_MAX];
+
+    if(!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) continue;
+    if(path_join(child, sizeof(child), path, ent->d_name)) {
+      rc = -1;                            /* name too long to address */
+      continue;
+    }
+    if(path_remove_tree(child)) rc = -1;
+  }
+  closedir(d);
+  if(rmdir(path) && errno != ENOENT) rc = -1;
+  return rc;
 }

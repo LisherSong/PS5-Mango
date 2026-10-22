@@ -2374,7 +2374,7 @@ smb2_rename_async(struct smb2_context *smb2, const char *oldpath,
         }
 
         /* SET INFO command */
-        rn_info.replace_if_exist = 0;
+        rn_info.replace_if_exist = 1; /* WFM: POSIX rename replacement. */
         rn_info.file_name = rename_data->newpath;
 
         memset(&si_req, 0, sizeof(struct smb2_set_info_request));
@@ -2739,6 +2739,16 @@ uint32_t
 smb2_get_max_write_size(struct smb2_context *smb2)
 {
         return smb2->max_write_size;
+}
+
+/* WFM: see the declaration in smb2/libsmb2.h. Credits are consumed when a PDU
+ * is handed to the socket (socket.c) and replenished from every response's
+ * CreditRequest/Grant, so this is the number of 64KB units that can still be
+ * put on the wire right now. */
+int
+smb2_get_credits(struct smb2_context *smb2)
+{
+        return smb2 ? smb2->credits : 0;
 }
 
 smb2_file_id *

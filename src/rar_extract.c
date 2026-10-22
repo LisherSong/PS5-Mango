@@ -24,6 +24,7 @@
 #include "nx_fs.h"        /* NX_CREATE_MODE: unrar's own choice is not 0777 */
 
 #include "unrar_c_api.h"  /* facade — links against the unrar7 static lib at build time */
+#include "path_ops.h"   /* path_remove_tree(): no libmicrohttpd -I out here */
 
 #include <dirent.h>
 #include <errno.h>
@@ -50,7 +51,7 @@
 #endif
 
 #define RARX_TMP_ATTEMPTS 64
-#define RARX_STAGING_PREFIX ".wfm-extract-"
+#define RARX_STAGING_PREFIX ".nex-extract-"
 #define RARX_PUBLISH_MAX_DEPTH 128
 #define RARX_SPACE_SLACK_PER_ENTRY 512
 
@@ -568,39 +569,9 @@ make_staging(rarx_ctx_t *c, const char *parent) {
 }
 
 static void
-remove_tree(const char *path) {
-  DIR *dir = opendir(path);
-  struct dirent *ent;
-
-  if(!dir) {
-    rmdir(path);
-    return;
-  }
-  while((ent = readdir(dir))) {
-    char child[ZIPX_PATH_MAX];
-    struct stat st;
-
-    if(!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) {
-      continue;
-    }
-    if(snprintf(child, sizeof(child), "%s/%s", path, ent->d_name) >=
-         (int)sizeof(child)) {
-      continue;
-    }
-    if(!lstat(child, &st) && S_ISDIR(st.st_mode)) {
-      remove_tree(child);
-    } else {
-      unlink(child);
-    }
-  }
-  closedir(dir);
-  rmdir(path);
-}
-
-static void
 cleanup_staging(rarx_ctx_t *c) {
   if(c->staging_created) {
-    remove_tree(c->staging);
+    path_remove_tree(c->staging);
     c->staging_created = 0;
   }
 }

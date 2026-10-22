@@ -19,10 +19,52 @@ ps5-obj/
 # Whitelist: the front-end acceptance harness (vm-level checks pinned to
 # assets/index.html) is a real deliverable, not scratch.
 !.build/dock_pkg_checks.mjs
+# Upload same-name conflict acceptance (routes /api/upload-file, 11 assertions)
+# + generic inline-script syntax checker used by it.
+!.build/chk_upload.mjs
+!.build/chk_inline.mjs
 # Deep-tree save backup crash repro (SIGSEGV at copy_tree_r depth 13, the
 # 68KB-frame LTO-inlining regression). One-liner triage for future stack
 # regressions: wsl.exe -d Ubuntu-22.04 bash .build/repro-deep-backup.sh
 !.build/repro-deep-backup.sh
+# Static-guard driver: the ONE list of chk_*.py guards + their counter-proofs,
+# plus two self-checks (registry parity against build-verify-wsl.sh, and
+# "the whole suite must leave assets/ + src/ byte-identical"). Guards used to be
+# registered separately in each build script; when one script superseded another
+# it copied the list and dropped chk_signal_disposition.py, which then stopped
+# running and nobody noticed. One list + a parity check is the fix.
+!.build/run-guards.sh
+# Front-end gate stamp helper. `--write` records that the Chromium suite and the
+# save-page counter-proofs passed for a specific set of front-end bytes;
+# `--check` lets the build ask "was the gate run for THIS tree?" instead of
+# echoing a line nobody updates (that line still said "196 assertions" at 214).
+!.build/frontend_stamp.py
+# ⚠️ Deliberately NOT whitelisted: .build/.frontend-gate-ok is the per-run
+# record those two produce -- it is state, not source.
+
+# ---- guard suite: deliverable, not scratch -------------------------------
+# 2026-10-16: of the 127 scripts under .build/, exactly TWO were tracked --
+# every guard, every counter-proof, every verification entry point lived only in
+# the working copy. That is the deeper half of the "guards rot silently" problem:
+# a guard that is not in the repo cannot be run on a fresh clone at all, and
+# `make test` would fail with "file not found" instead of telling you anything.
+# Whitelisted by family (screenshots/backups/probes stay ignored):
+!.build/chk_*.py
+!.build/chk-*-counterproof.py
+!.build/savemgr-game-counterproof.py
+!.build/saves-ui-counterproof.py
+# ⚠️ By family, not by name. The first pass listed .sh drivers one by one and
+#    immediately missed two new ones (*-counterproof-wsl.sh) plus every *_test.c
+#    -- including sfo_unit_test.c, which had never been tracked. Every .sh and
+#    .c under .build/ is a test driver or a unit-test TU; there is no scratch
+#    of those types here (scratch is preview/, shots/, logs/ -- still ignored).
+!.build/*.sh
+!.build/*.c
+# The offline preview harness the front-end gate drives (preview_build.py is
+# also what keeps a re-run from silently wiping the injected fetch stub).
+!.build/preview_build.py
+!.build/preview_check.mjs
+!.build/preview_stub.js
 # hosttest.py points WFM_SAVE_LOG at the repo root and re-creates it on every
 # run; it is a per-run forensics dump, never a deliverable.
 save-delete.log

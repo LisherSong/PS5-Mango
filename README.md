@@ -1,4 +1,4 @@
-# PS5 Nexus
+# PS5 Mango
 
 A self-contained web control panel for a jailbroken PS5: manage files on the
 console, pull from and push to network shares, unpack archives, install
@@ -14,7 +14,7 @@ alongside it.
 > **Where the version is shown.** The payload manager (and etaHEN's
 > *plugins / payload ELFs* menu) lists payloads by **file name**, so the version
 > deliberately lives in the file name: the build output is
-> `PS5-Nexus-v1.0.0.elf`. Bumping `VERSION_TAG` in the Makefile renames the
+> `PS5-Mango-v1.0.0.elf`. Bumping `VERSION_TAG` in the Makefile renames the
 > artifact, which is the only thing the console can display.
 > The payload also reports its version in the startup notification, on stdout,
 > and over `/api/status`.
@@ -36,7 +36,7 @@ alongside it.
   token so saving over a file that changed meanwhile is detected instead of
   silently clobbering it.
 - Upload single files, multiple files or whole folders (file picker or
-  drag-and-drop). Data is written to a `.wfm-upload-*.tmp` file that is renamed
+  drag-and-drop). Data is written to a `.nex-upload-*.tmp` file that is renamed
   into place only once the byte count matches, so an interrupted upload never
   leaves a truncated file that looks complete.
 - Download a single file directly, or a folder / multi-selection as a `.tar`
@@ -97,7 +97,7 @@ enqueued from any part — the engine normalises them to the first volume.
   current data before writing anything back, and a failed restore rolls back
   automatically — there is no code path that overwrites a save without a
   recoverable copy existing first. Snapshots live in `/data/savesnap` (never
-  inside `/data/save_files`, which the system prunes).
+  inside `/data/Mango/tmp`, the save-domain temp working directory).
 
 ### Tasks and diagnostics
 
@@ -122,7 +122,7 @@ Requires the [PS5 payload SDK](https://github.com/ps5-payload-dev/sdk#quick-star
 
 ```sh
 export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
-make                 # -> PS5-Nexus-v1.0.0.elf
+make                 # -> PS5-Mango-v1.0.0.elf
 ```
 
 `libmicrohttpd` is linked from the SDK. `make` checks for it and runs
@@ -134,8 +134,8 @@ For local UI work on Linux — same code, no PS5 kernel calls, includes the
 `/icon0.png` favicon:
 
 ```sh
-make linux           # -> PS5-Nexus-linux-v1.0.0
-./PS5-Nexus-linux-v1.0.0
+make linux           # -> PS5-Mango-linux-v1.0.0
+./PS5-Mango-linux-v1.0.0
 ```
 
 `make NAS=0` drops the vendored SMB/NFS backends and their libraries.
@@ -153,7 +153,7 @@ Send the built ELF to an ELF loader on the console (the usual listener is
 
 ```sh
 export PS5_HOST=ps5_ip_address
-nc -q0 "$PS5_HOST" 9021 < PS5-Nexus-v1.0.0.elf
+nc -q0 "$PS5_HOST" 9021 < PS5-Mango-v1.0.0.elf
 ```
 
 The console shows a notification with the version and the actual listen port.
@@ -165,7 +165,7 @@ http://<ps5-ip>:2026/
 
 The payload listens on `2026` and falls back to the next free port if it is
 taken — the notification and the top bar both report the real one. On startup it
-also registers a home-screen launcher (title id `NEXS88888`, name *PS5 Nexus*)
+also registers a home-screen launcher (title id `MANG88888`, name *PS5 Mango*)
 when it is missing; the UI exposes the same action as a button, because
 registering it touches the kernel and must never happen by itself while a game
 is running.
@@ -225,6 +225,7 @@ Built on the work of others:
 - **[7-Zip / LZMA SDK](https://www.7-zip.org/)** — 7z extraction (vendored, `third_party/7z`). LGPL-2.1+ / unRAR restriction.
 - **[minizip-ng](https://github.com/zlib-ng/minizip-ng)** — zip/zipx extraction incl. crypto backends (vendored, `third_party/minizip-ng`). Zlib licence.
 - **[zlib](https://zlib.net/)** — DEFLATE (vendored, `third_party/zlib`). Zlib licence.
+- **[n0llptr/Playstation-5-Save-Mounter](https://github.com/n0llptr/Playstation-5-Save-Mounter)** — `mounter_payload` reference for the `sceFs*` save-mount call order. GPL-3.0. In particular it showed that `sceUserServiceInitialize()` must run before any `sceUserService*` call; without it `sceUserServiceGetForegroundUser()` silently leaves the id at 0, and that 0 was being written into the save's SFO `USER_ID`.
 - **[owendswang/wfm-7zip-helper](https://github.com/owendswang/wfm-7zip-helper)** — the helper-payload approach this project originally used; it has since been replaced by the in-process engine below, thanks for showing the way.
 - **[seregonwar/zftpd](https://github.com/seregonwar/zftpd)** — socket buffer tuning reference. MIT.
 - **[itsPLK/ps5-payload-manager](https://github.com/itsPLK/ps5-payload-manager)** — payload packaging reference. GPL-3.0.

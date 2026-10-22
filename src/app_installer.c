@@ -29,8 +29,6 @@
 INCASSET(param_json, "assets/param.json");
 INCASSET(icon0_png, "assets/icon0.png");
 
-int sceAppInstUtilAppInstallAll(void *);
-
 static int
 install_file(const char *path, const uint8_t *data, size_t size) {
   struct stat st;
@@ -68,7 +66,9 @@ install_app(const char *title_id, const char *dir) {
     return sceAppInstUtilAppInstallTitleDir(title_id, dir, 0);
   }
 
-  return sceAppInstUtilAppInstallAll(0);
+  /* Not statically linked (see pkg_installer.c): routed through the same
+   * runtime-loaded library, Ipmi-first. */
+  return pkg_appinstutil_app_install_all();
 }
 
 static int
@@ -88,6 +88,16 @@ app_register_manual(void) {
   return app_install_if_needed();
 }
 
+void
+app_register_assets(void) {
+  /* Cheap, never blocks: hand the icon to the asset table so the web UI can
+   * serve /icon0.png from the first request. Deliberately separate from
+   * app_install_if_needed() — see main.c, the installer half runs on a
+   * background thread because a PS5 installer call that blocks must not keep
+   * the HTTP server from coming up. */
+  asset_register("/icon0.png", icon0_png, icon0_png_size, "image/png", 0);
+}
+
 int
 app_install_if_needed(void) {
   const char *title_id = TITLE_ID;
@@ -99,7 +109,7 @@ app_install_if_needed(void) {
   int update_needed = 0;
   int err;
 
-  asset_register("/icon0.png", icon0_png, icon0_png_size, "image/png", 0);
+  app_register_assets();
 
   snprintf(base_dir, sizeof(base_dir), "/user/app/%s", title_id);
   snprintf(sce_sys_dir, sizeof(sce_sys_dir), "/user/app/%s/sce_sys", title_id);

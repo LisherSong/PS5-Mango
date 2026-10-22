@@ -1,6 +1,12 @@
-/* 三处修复的真实源码断言（vm + 最小 DOM 桩，Playwright 环境坏了走不了浏览器）：
+/* 页面逻辑的真实源码断言（vm + 最小 DOM 桩，Playwright 环境坏了走不了浏览器）：
    ① renderJob 的 delScrimExempt 豁免：存档删除任务不得弹 #scrimDel 进度框
-   ② ppCleanupWhenDone：done + "already installed — skipped" ⇒ 保留暂存（不调 /api/delete）
+   ② ppCleanupWhenDone：真装完的 done ⇒ 自动删暂存（/api/delete）；already
+      installed / 失败 / 取消 ⇒ 保留暂存
+   ③ ZIP 导入走流式通道；扫光挂在填充条 i::after
+   ④ 库扫描根 + 去重（大小写双拼写、unreadable 提示、**跨种类同 title 只出一张卡**）
+   ⑤ 安装失败提示的可读性；⑥ 版本牌
+
+   由 .build/frontend-verify-windows.sh 驱动（2026-10-22 补入：此前全仓无人调用）。
    纪律：每条断言都要有反证（counterfactual）—— 改坏源码必须变红。 */
 import fs from "node:fs";
 import vm from "node:vm";
@@ -62,22 +68,29 @@ console.log("【1】renderJob 尊重 delScrimExempt（存档删除不弹删除�
   ok(c.bar.classes.has("on"), "反证：过滤被摘掉 ⇒ 豁免失效、进度框弹出（断言能红）");
 }
 
-/* ---------- ② ppCleanupWhenDone：任何终态都不再自动删暂存 ---------- */
-console.log("【2】ppCleanupWhenDone：所有终态都保留暂存（不调 /api/delete）");
+/* ---------- ② ppCleanupWhenDone：真装完自动删暂存；跳过/失败保留 ---------- */
+console.log("【2】ppCleanupWhenDone：装完自动删暂存（跳过/失败保留）");
 {
   const code = cut(/function ppCleanupWhenDone\(taskId, path\)\s*\{[\s\S]*?\n\}/,
                    "ppCleanupWhenDone");
   const mk = (pollResp, mutate) => {
     const calls = [];
     const ctx = {
-      PKG_STAGING: "/data/wfm/incoming",
+      PKG_STAGING: "/data/Mango/incoming",
       setInterval: (fn) => { fn(); return 1; },   // 立即跑第一轮
       clearInterval() {},
       apiPost: async (url, body) => {
         calls.push({ url, body });
         return url === "/api/install/poll" ? pollResp : { ok: true };
       },
+      apiJson: async (url, body) => {
+        calls.push({ url, body });
+        return { ok: true };
+      },
       toast: m => calls.push({ url: "@toast", body: m }),
+      /* 后台清理用：真机源码在删成功时调它把任务从删除坞里撤掉。
+         这里只需要存在（不关心副作用），缺了会 ReferenceError 整段崩掉。 */
+      delTrackQuiet: () => {},
     };
     vm.createContext(ctx);
     vm.runInContext(mutate ? mutate(code) : code, ctx);
@@ -88,30 +101,38 @@ console.log("【2】ppCleanupWhenDone：所有终态都保留暂存（不调 /ap
   (async () => {
     const a = mk({ ok: true, state_name: "done",
                    note: "already installed (CUSA45599) — skipped" });
-    a.run(9, "/data/wfm/incoming/x.pkg");
+    a.run(9, "/data/Mango/incoming/x.pkg");
     await new Promise(r => setImmediate(r));
     ok(!a.calls.some(c => c.url === "/api/delete"),
-       "skipped 的 done：不删暂存");
+       "skipped 的 done：不删暂存（已装过，别把用户留下的文件删了）");
     ok(a.calls.some(c => c.url === "@toast" && /跳过/.test(c.body)),
        "skipped 的 done：给用户明说（toast 提到跳过）");
 
-    /* 2026-10-03 契约反转：真装完的 done 也不删 —— 两轮真机反馈「传的包自己
-       消失了」，自动清理省的空间换不回信任；文件页可见、用户自己删。 */
+    /* 2026-10-07 契约：真装完的 done → 自动删掉这一个暂存 PKG（用户拍板；
+       失败/中断/跳过保留）。只删本次上传的文件，不碰目录里其他东西。 */
     const b = mk({ ok: true, state_name: "done", note: "" });
-    b.run(9, "/data/wfm/incoming/x.pkg");
+    b.run(9, "/data/Mango/incoming/x.pkg");
     await new Promise(r => setImmediate(r));
-    ok(!b.calls.some(c => c.url === "/api/delete"),
-       "真装完的 done：也不删暂存（保留在 /data/wfm/incoming）");
+    await new Promise(r => setImmediate(r));
+    ok(b.calls.some(c => c.url === "/api/delete" &&
+                         c.body && c.body.paths === "/data/Mango/incoming/x.pkg"),
+       "真装完的 done：自动删这一个暂存 PKG（/api/delete 带它的完整路径）");
+    ok(b.calls.some(c => c.url === "@toast" && /已清理/.test(c.body)),
+       "真装完的 done：toast 告知暂存已清理");
 
-    /* 反证：把自动删除塞回 done 分支 —— 断言必须打红（证明它有牙）。
-       ⚠️ index.html 是 CRLF 行尾（core.autocrlf），替换必须 \r?\n 兼容。 */
+    /* 反证：把自动删除从 done 分支摘掉 —— 断言必须打红（证明它有牙）。
+       ⚠️ 锚点必须与源码逐字一致：源码是 { paths: path }（字符串，后端
+       parse_paths 按行切，hosttest 也用字符串），写成数组 [path] 就替换不到，
+       反证会以「/api/delete 仍被调用」的形式失败 —— 那正是本段第一次跑起来
+       时撞到的事。 */
     const c = mk({ ok: true, state_name: "done", note: "" },
-                 code => code.replace(/clearInterval\(t\);\r?\n      if \(\/already/,
-                    'clearInterval(t);\n      await apiPost("/api/delete", { paths: [path] });\n      if (/already'));
-    c.run(9, "/data/wfm/incoming/x.pkg");
+                 code => code.replace('apiJson("/api/delete", { paths: path })',
+                                      "Promise.resolve({ ok: false })"));
+    c.run(9, "/data/Mango/incoming/x.pkg");
     await new Promise(r => setImmediate(r));
-    ok(c.calls.some(c2 => c2.url === "/api/delete"),
-       "反证：自动删除塞回 ⇒ /api/delete 被调用（断言能红）");
+    await new Promise(r => setImmediate(r));
+    ok(!c.calls.some(c2 => c2.url === "/api/delete"),
+       "反证：自动删除被摘掉 ⇒ /api/delete 不再被调用（断言能红）");
   })();
 }
 
@@ -149,11 +170,14 @@ let section4Done = false;
 {
   const roots = cut(/const LIB_SCAN_ROOTS = \[[\s\S]*?\];/, "LIB_SCAN_ROOTS");
   ok(/"\/data\/pkg",\s*"\/data\/PKG"/.test(roots) &&
-     /"\/data\/wfm\/incoming"/.test(roots),
-     "扫描根含 /data/pkg 与 /data/PKG 双拼写 + 暂存目录 /data/wfm/incoming");
+     /"\/data\/Mango\/incoming"/.test(roots),
+     "扫描根含 /data/pkg 与 /data/PKG 双拼写 + 暂存目录 /data/Mango/incoming");
 
+  /* ⚠️ 取的是 renderLibraryInner：2026-10-07 起 renderLibrary 变成一层薄壳
+     （重入锁 + 脏标记 + 上次扫描时间），真正的扫描/去重/渲染在 Inner 里。
+     断言盯的是**渲染逻辑**，所以抽 Inner —— 否则壳里没有 libCard 调用，cut 直接失手。 */
   const code = roots + "\n" +
-               cut(/async function renderLibrary\(\)\s*\{[\s\S]*?\n\}/, "renderLibrary");
+               cut(/async function renderLibraryInner\(\)\s*\{[\s\S]*?\n\}/, "renderLibraryInner");
   const mk = (responses, mutate) => {
     const box = { innerHTML: "" };
     const count = { textContent: "" };
@@ -170,7 +194,7 @@ let section4Done = false;
     vm.createContext(ctx);
     vm.runInContext(mutate ? mutate(code) : code, ctx);
     return { box, count,
-             run: () => vm.runInContext("renderLibrary()", ctx) };
+             run: () => vm.runInContext("renderLibraryInner()", ctx) };
   };
   const cards = b => (b.innerHTML.match(/<card /g) || []).length;
 
@@ -211,12 +235,56 @@ let section4Done = false;
       "/data/pkg": { ok: true, packages: [{ path: "/data/pkg/a.pkg" }], unreadable: [] },
       "/data/PKG": { ok: true, packages: [{ path: "/data/PKG/a.pkg" }], unreadable: [] },
     }, code => code.replace(
-      /const key = String\(p && p\.path \|\| ""\)\.toLowerCase\(\);/,
-      'const key = String(p && p.path || "");'));
+      "const key = String(p.path).toLowerCase();",
+      "const key = String(p.path);"));
     d.run();
     await new Promise(r => setImmediate(r));
     ok(cards(d.box) === 2,
        "反证：去重键不用小写 ⇒ 双卡出现（断言能红）");
+
+    /* ---- 跨种类去重（真机 2026-10-22 v1.0.28 报障）----
+       用户原话：「看下 pkg 页面是不是有重复的游戏了」。实测：/data/pkg 里留着
+       .pkg 的游戏（CUSA45599 DAVE THE DIVER、PPSA01650 YouTube）在 PKG 页各出
+       两张卡 —— 一张是 .pkg 文件卡（v1.0.28 之前就有），一张是 app 根的
+       「安装目录」卡（v1.0.28 新增）。口径：有 .pkg 文件卡时留文件卡。 */
+    const e = mk({
+      "/data/pkg": { ok: true, packages: [
+        { title_id: "CUSA45599", path: "/data/pkg/dave.pkg", installed: true }],
+        unreadable: [] },
+      "/user/app": { ok: true, packages: [
+        { title_id: "CUSA45599", path: "/user/app/CUSA45599", app_dir: true }],
+        unreadable: [] },
+    });
+    e.run();
+    await new Promise(r => setImmediate(r));
+    ok(cards(e.box) === 1 && /\/data\/pkg\/dave\.pkg/.test(e.box.innerHTML),
+       "同一游戏：.pkg 文件卡 + app 安装目录卡 ⇒ 只出一张（留信息更全的 .pkg 卡）");
+
+    /* 本机没有 .pkg 副本的游戏（SMB 流式安装）—— app 目录卡必须留着，
+       这正是 v1.0.28 加 app 根要解决的那个报障，不能被误杀成空列表。 */
+    const f = mk({
+      "/user/app": { ok: true, packages: [
+        { title_id: "PPSA23226", path: "/user/app/PPSA23226", app_dir: true }],
+        unreadable: [] },
+    });
+    f.run();
+    await new Promise(r => setImmediate(r));
+    ok(cards(f.box) === 1 && /\/user\/app\/PPSA23226/.test(f.box.innerHTML),
+       "只有安装目录卡（SMB 装好的游戏）⇒ 照常出现");
+
+    /* 反证：跨种类判定被摘掉 ⇒ 双卡立刻回来（断言能红） */
+    const g = mk({
+      "/data/pkg": { ok: true, packages: [
+        { title_id: "CUSA45599", path: "/data/pkg/dave.pkg", installed: true }],
+        unreadable: [] },
+      "/user/app": { ok: true, packages: [
+        { title_id: "CUSA45599", path: "/user/app/CUSA45599", app_dir: true }],
+        unreadable: [] },
+    }, code => code.replace("pkgTid.has(t) || seenTid.has(t)", "seenTid.has(t)"));
+    g.run();
+    await new Promise(r => setImmediate(r));
+    ok(cards(g.box) === 2,
+       "反证：跨种类去重被摘掉 ⇒ 同游戏双卡（断言能红）");
 
     section4Done = true;
   })();
@@ -289,11 +357,43 @@ console.log("【6】版本牌：applyStatus 消费 /api/status 的 version 字�
      "反证：textContent 赋值被摘掉 ⇒ 牌子空着（断言能红）");
 }
 
+/* ---------- ⑦ 安装包格式名牌分类 libFmt ---------- */
+console.log("【7】libFmt：安装包格式分类（卡片格式名牌徽章）");
+{
+  const code = cut(/function libFmt\(p\)\s*\{[\s\S]*?\n\}/, "libFmt");
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(code, ctx);
+  const f = p => vm.runInContext(`libFmt(${JSON.stringify(p)})`, ctx);
+
+  ok(f({ fmt: "app" }) === "app",   "后端权威 fmt=app 直接采用");
+  ok(f({ app_dir: true }) === "app","兜底：app_dir ⇒ 文件夹");
+  ok(f({ path: "/data/pkg/GAME.pkg" }) === "pkg", "兜底：.pkg ⇒ PKG");
+  ok(f({ is_fpkg: true, path: "/x/GAME.ffpkg" }) === "ffpkg", "兜底：.ffpkg ⇒ ffpkg");
+  ok(f({ is_fpkg: true, path: "/x/GAME.exfat" }) === "exfat", "兜底：.exfat ⇒ exFAT");
+  ok(f({ path: "/x/GAME.lz4" }) === "lz4", "兜底：.lz4 ⇒ LZ4");
+
+  /* 反证：摘掉 exfat 后缀判据 ⇒ .exfat 退回 pkg（断言能红）。
+     ⚠️ index.html 是 CRLF 行尾，替换串不含换行，无 \r?\n 问题。 */
+  const broken = code.replace('  if (/\\.exfat$/.test(path)) return "exfat";', '');
+  const ctx2 = {}; vm.createContext(ctx2);
+  vm.runInContext(broken, ctx2);
+  const fb = p => vm.runInContext(`libFmt(${JSON.stringify(p)})`, ctx2);
+  ok(fb({ path: "/x/GAME.exfat" }) !== "exfat",
+     "反证：exfat 判据被摘掉 ⇒ 退回 pkg（断言能红）");
+}
+
 /* ---------- 收尾：等所有异步段落跑完再统一报告退出 ----------
    原 exit 在【2】的 IIFE 末尾；新增的异步段会被它提前 process.exit 杀死。 */
 (async () => {
   for (let i = 0; i < 50 && !section4Done; i++)
     await new Promise(r => setImmediate(r));
+  /* 【4】是唯一带 await 的段落：它没跑完（抛了 / 卡住）就当失败 —— 否则这只
+     IIFE 会拿「没跑过」当「通过」，正是这类门禁最常见的假绿形态。 */
+  if (!section4Done) {
+    console.error("  ✗ 【4】异步断言没有跑完（抛异常或卡住）");
+    fails++;
+  }
   console.log(fails ? `\n${fails} 项失败` : "\n全部通过");
   process.exit(fails ? 1 : 0);
 })();

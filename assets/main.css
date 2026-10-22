@@ -288,6 +288,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 .dlg{width:min(660px,94vw);max-height:88vh;overflow:auto;background:var(--page);border:1px solid var(--line-2);border-radius:var(--r-card);
   box-shadow:0 30px 80px -20px rgba(0,0,0,.7);animation:pop .24s cubic-bezier(.16,1,.3,1) both}
+/* 添加 NAS 弹窗内容固定且不多，不需要滚动条 */
+#scrimNas .dlg{overflow:visible;max-height:none}
 @keyframes pop{from{opacity:0;transform:translateY(14px) scale(.99)}to{opacity:1;transform:none}}
 .dlg-h{display:flex;align-items:center;gap:11px;padding:20px 24px 14px;border-bottom:1px solid var(--line)}
 .dlg-h h2{margin:0;font:600 17px var(--sans)}

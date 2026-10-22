@@ -19,17 +19,19 @@ endif
 # lists payloads by FILE NAME, so a version that is not part of the file name is
 # simply not visible on the console. That is exactly what the previous
 # web-file-mgr-vX.Y.Z.elf naming bought, and what this build lost while it was
-# still producing a bare NEXUS.elf.
-# Side benefit: because the version is in the target name, bumping it also
-# defeats make's "CFLAGS changed but nothing depends on it" staleness — a plain
-# VERSION_TAG edit alone would silently reuse every stale object and link a
-# binary that still reports the old version.
-VERSION_TAG := v1.0.1
+# still producing a bare MANGO.elf.
+# ⚠️ VERSION_TAG is baked in via -D (CFLAGS/LINUX_CFLAGS). make does NOT track
+# flag changes, so a plain bump only forces a re-LINK: the stale objects keep
+# reporting the old version (v1.0.1 leaked into the v1.0.2 build once — the
+# hosttest "api/status reports the Makefile's VERSION_TAG" check caught it).
+# The VSTAMP prerequisite on the src/ object rules below forces those objects
+# to recompile on every version change.
+VERSION_TAG := v1.0.31
 # ⚠️ TITLE_ID MUST match "titleId" in assets/param.json. app_installer.c uses
 # TITLE_ID to create /user/app/<id>, but the PS5 launcher reads the title id out
 # of the param.json we drop beside it; if they disagree the app is installed
-# under a directory the launcher does not recognise. param.json says NEXS88888.
-TITLE_ID    := NEXS88888
+# under a directory the launcher does not recognise. param.json says MANG88888.
+TITLE_ID    := MANG88888
 PYTHON      ?= python3
 MINIFY      ?= 1
 STRIP       ?= $(PS5_PAYLOAD_SDK)/bin/prospero-strip
@@ -50,13 +52,14 @@ NAS         ?= 1
 #     v1.0.0 was still running would match nothing -> two live instances, and the
 #     new one would quietly fall through to port 2027 instead of taking over.
 # PROCESS_NAME is therefore the version-free stem; BIN carries the version.
-BIN        := PS5-Nexus-$(VERSION_TAG).elf
-LINUX_BIN  := PS5-Nexus-linux-$(VERSION_TAG)
+BIN        := PS5-Mango-$(VERSION_TAG).elf
+LINUX_BIN  := PS5-Mango-linux-$(VERSION_TAG)
 COMMON_SRCS := src/main.c src/websrv.c src/filemgr.c src/file_response.c src/task.c \
   src/upload.c src/download.c src/text.c src/list.c src/space.c src/fs_util.c \
   src/json_util.c src/path_util.c src/asset.c src/mime.c src/notify.c \
-  src/pkg_installer.c src/pkg_stream.c src/pkg_info.c src/nexus_port.c \
-  src/transfer.c src/archive_extract.c src/elfldr.c src/savemgr.c
+  src/mango_log.c src/pkg_installer.c src/pkg_info.c src/mango_port.c \
+  src/pkg_stream.c src/save_domain.c src/transfer.c src/archive_extract.c \
+  src/elfldr.c src/savemgr.c src/zip_write.c
 PS5_SRCS    := $(COMMON_SRCS) src/app_installer.c src/cpu_support_stub.c
 LINUX_SRCS  := $(COMMON_SRCS)
 # assets/serve-pkg.py (the Windows helper offered as a download off the payload's
@@ -85,8 +88,24 @@ GEN_SRCS    := $(patsubst assets/%,gen/%, $(ASSETS:=.c))
 # Object trees. Two separate trees: PS5 (prospero-clang) vs host (cc/g++)
 # objects differ in architecture and must never mix. Defined BEFORE the
 # ARCH_OBJS patsubsts below -- those use := and need these already set.
-PS5_OBJDIR     := ps5-obj
-LINUX_OBJDIR   := linux-obj
+#
+# ⚠️ They deliberately live OUTSIDE this directory (under MANGO_BUILD_ROOT), not
+# in ./ps5-obj and ./linux-obj. Reason (2026-10-16): the project sits on the
+# Windows Desktop, and one `WFM_CLEAN=1` build deletes+recreates ~460 objects.
+# File COUNT is the problem, not bytes (both trees together are only ~11 MB, but
+# 458 files): every one of those writes crosses 9p onto the Desktop, which is
+# exactly what explorer, the WSearch indexer and the 11 third-party shell icon
+# overlay handlers (Baidu Netdisk owns 7 of them) re-scan. The measured fallout
+# was shell-session restarts while a build was running.
+#
+# ⚠️ This default MUST stay byte-identical to the one in .build/build-root.sh --
+# that file is the shell-side copy of the same fact (make and sh cannot share one
+# syntax). Drift between the two is what .build/chk_build_root.py guards, with
+# .build/chk-build-root-counterproof.py proving the guard actually goes red.
+# Override with the environment: MANGO_BUILD_ROOT=/somewhere make all
+MANGO_BUILD_ROOT ?= $(HOME)/.cache/ps5-mango-build
+PS5_OBJDIR     := $(MANGO_BUILD_ROOT)/ps5-obj
+LINUX_OBJDIR   := $(MANGO_BUILD_ROOT)/linux-obj
 
 # ------------------------------------------------------- NAS backends (vendor)
 # Vendored libsmb2 (SMB2/3) and libnfs (NFSv3/v4) behind src/transfer.c. Without
@@ -209,28 +228,56 @@ CFLAGS := -Oz -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Werror -
 CFLAGS += `$(PKG_CONFIG) libmicrohttpd --cflags`
 LDFLAGS := -Wl,--gc-sections
 LDADD  := `$(PKG_CONFIG) libmicrohttpd --libs`
-LDADD  += -lSceIpmi -lSceAppInstUtil -lSceUserService
+# ⚠️ NO -lSceIpmi / -lSceAppInstUtil here: AppInstUtil must be dlopen'd at
+# runtime (Ipmi first) — statically linking it killed the payload on install
+# (proven against Loopayeh/pkg-sender, 2026-10-05). pkg_installer.c owns the
+# runtime loading; -lSceUserService stays (foreground-user lookup).
+LDADD  += -lSceUserService
 LINUX_CFLAGS := -O2 -flto -Wall -Werror -Isrc -Ithird_party/sqlite3 -Ithird_party/minizip-ng/include -Ithird_party/zlib/include -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
 LINUX_CFLAGS += `$(HOST_PKG_CONFIG) libmicrohttpd --cflags`
 LINUX_LDADD := `$(HOST_PKG_CONFIG) libmicrohttpd --libs` -pthread
 
-# ⚠️ NEXUS_HAVE_* for OUR OWN TUs (src/transfer.c) MUST sit AFTER the base
+# ⚠️ MANGO_HAVE_* for OUR OWN TUs (src/transfer.c) MUST sit AFTER the base
 # CFLAGS / LINUX_CFLAGS ':=' assignments above. A later ':=' clobbers an earlier
 # '+=', so appending them next to the vendor flags would leave the SMB/NFS glue
 # #if'd out while the libraries still get linked (and then dropped by
 # --gc-sections) -- i.e. exactly the silent "NAS never connects" failure.
 ifeq ($(NAS),1)
-CFLAGS       += -DNEXUS_HAVE_LIBSMB2 -Ithird_party/libsmb2/include
-CFLAGS       += -DNEXUS_HAVE_LIBNFS -Ithird_party/libnfs/include -Ithird_party/libnfs/include/nfsc
-LINUX_CFLAGS += -DNEXUS_HAVE_LIBSMB2 -Ithird_party/libsmb2/include
-LINUX_CFLAGS += -DNEXUS_HAVE_LIBNFS -Ithird_party/libnfs/include -Ithird_party/libnfs/include/nfsc
+CFLAGS       += -DMANGO_HAVE_LIBSMB2 -Ithird_party/libsmb2/include
+CFLAGS       += -DMANGO_HAVE_LIBNFS -Ithird_party/libnfs/include -Ithird_party/libnfs/include/nfsc
+LINUX_CFLAGS += -DMANGO_HAVE_LIBSMB2 -Ithird_party/libsmb2/include
+LINUX_CFLAGS += -DMANGO_HAVE_LIBNFS -Ithird_party/libnfs/include -Ithird_party/libnfs/include/nfsc
 endif
 
-.PHONY: all linux deps linux-deps clean
+.PHONY: all linux deps linux-deps clean test test-guards test-host test-frontend
 
 all: deps $(BIN)
 
 linux: linux-deps $(LINUX_BIN)
+
+# `make test` 只跑跨平台那半边。行为套件绑平台（hosttest 要宿主构建 + WSL，
+# 前端断言要 Windows Chromium），硬塞进默认目标只会让它在另一半平台上假红。
+# ⚠️ 关键是：**守卫必须在构建里有个入口**。此前它们只活在
+# .build/build-verify-wsl.sh 里，而那个脚本要手工跑 ⇒ chk_signal_disposition.py
+# 在被取代时漏注册，停摆至今无人察觉（守卫腐烂是静默的：没人跑，就没红过）。
+test: test-guards
+	@echo
+	@echo "  static guards + counter-proofs: OK"
+	@echo "  行为套件不在这里跑，按平台选："
+	@echo "    make test-host      hosttest.py (需宿主构建，WSL)"
+	@echo "    make test-frontend  Chromium 断言 + 前端反证 (需 Windows)"
+
+# 静态守卫：只读源码 + python3，**不需要构建产物**。这是故意的 —— 守卫守的是
+# 形状（挂载次数、参数所有权、SIGPIPE disposition…），不是这次的产物。
+# run-guards.sh 还会自检清单与主链注册集合是否一致，漏注册当场红。
+test-guards:
+	@bash .build/run-guards.sh
+
+test-host: linux
+	@$(PYTHON) hosttest.py
+
+test-frontend:
+	@bash .build/frontend-verify-windows.sh
 
 deps:
 	@$(PKG_CONFIG) --exists libmicrohttpd || ./install-libmicrohttpd.sh
@@ -288,13 +335,30 @@ LINUX_ARCH_OBJS := $(patsubst src/%.c,$(LINUX_OBJDIR)/arch/src/%.o,$(ARCH_SRCS))
   $(patsubst %.c,$(LINUX_OBJDIR)/%.o,$(ARCH_TP_C_SRCS)) \
   $(patsubst %.cpp,$(LINUX_OBJDIR)/%.o,$(UNRAR7_SRCS))
 
-$(PS5_OBJDIR)/src/%.o: src/%.c
+# Version stamp: the file NAME encodes VERSION_TAG, so a bump changes this
+# prerequisite path for every src/ object and forces recompilation without a
+# manual objdir wipe. Old stamps are pruned so returning to an earlier version
+# also recompiles instead of trusting a stale mtime. gen/ (asset blobs) and
+# arch/third_party objects are excluded: they compile without -DVERSION_TAG
+# and never read it, and regenerating/minifying every asset on each bump
+# would cost a full slow rebuild for nothing.
+# ⚠️ The stamp lives under MANGO_BUILD_ROOT too, not in .build/: everything a
+# build writes must stay off the Desktop (see the object-tree note above). With
+# this, the only things a build creates inside the project are the two
+# deliverables and gen/.
+VSTAMP := $(MANGO_BUILD_ROOT)/vstamp-$(VERSION_TAG)
+$(VSTAMP):
+	@mkdir -p $(dir $@)
+	@rm -f $(dir $@)vstamp-*
+	@touch $@
+
+$(PS5_OBJDIR)/src/%.o: src/%.c $(VSTAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 $(PS5_OBJDIR)/gen/%.o: gen/%.c | gen
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
-$(LINUX_OBJDIR)/src/%.o: src/%.c
+$(LINUX_OBJDIR)/src/%.o: src/%.c $(VSTAMP)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(LINUX_CFLAGS) -c -o $@ $<
 $(LINUX_OBJDIR)/gen/%.o: gen/%.c | gen

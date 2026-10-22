@@ -5,13 +5,18 @@
 
 #include <microhttpd.h>
 
+/* path_remove_tree() is declared in its own dependency-free header: the four
+ * archive engines call it and are compiled with ARCH_C_FLAGS, which has no
+ * libmicrohttpd -I. Re-exported here so existing callers keep compiling. */
+#include "path_ops.h"
+
 char *query_value(struct MHD_Connection *conn, const char *key);
 char *header_value(struct MHD_Connection *conn, const char *key);
 char *request_value(struct MHD_Connection *conn, const char *header,
                     const char *query);
 char *form_decode(const char *src, size_t len);
 char *body_form_value(const char *body, size_t body_size, const char *key);
-/* Parse a flat JSON object body (as sent by the NEXUS front-end) and return the
+/* Parse a flat JSON object body (as sent by the MANGO front-end) and return the
  * string value for `key`, with full JSON string unescaping (\", \\, \/, \uXXXX ->
  * UTF-8, including surrogate pairs). Caller frees the result. Returns NULL if the
  * key is absent or the value is not a string. */

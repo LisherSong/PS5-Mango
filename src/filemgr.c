@@ -26,15 +26,17 @@
 #include "extract_engine.h"
 #include "elfldr.h"
 #include "json_util.h"
+#include "mango_log.h"
 #include "path_util.h"
 #include "pkg_info.h"
 #include "pkg_installer.h"
+#include "pkg_stream.h"
 #include "savemgr.h"
 #include "websrv.h"
 
 #define COPY_BUFFER_SIZE (8 * 1024 * 1024)
 #define COPY_PIPELINE_SLOTS 3
-#define FILEMGR_AGGRESSIVE_COPY 0
+#define FILEMGR_AGGRESSIVE_COPY 1
 #define FILEMGR_PIPELINE_COPY 1
 #define SMALL_COPY_WORKERS 3
 #define FILE_TASK_QUEUE_LIMIT 128
@@ -192,7 +194,7 @@ ensure_parent_dirs(const char *base, const char *rel) {
     errno = ENAMETOOLONG;
     return -1;
   }
-  /* base 本身可能整条不存在（首次上传到 /data/wfm/incoming 就是这种形态：
+  /* base 本身可能整条不存在（首次上传到 /data/Mango/incoming 就是这种形态：
    * rel 是纯文件名时下面的循环一次都不进，旧实现直接返回 0，目录根本没建，
    * check_target_writable 随即报 "current directory is not writable"——真机
    * 存档导入「一上传就失败」的根因）。先把 base 链按 mkdir -p 语义逐级建出来。 */
@@ -270,6 +272,18 @@ task_finish_bytes(file_task_t *task, const char *current) {
   pthread_mutex_unlock(&g_tasks_lock);
 }
 
+/* ⚠️ OWNERSHIP: `data` must be heap memory the caller is handing over --
+ * send_buffer() passes it to MHD with MHD_RESPMEM_MUST_FREE, so MHD will
+ * free() it once the body is written. Callers therefore pass `strdup(...)`,
+ * `malloc(...)`, or a finished strbuf's `.data`, and must NOT free it again.
+ *
+ * Passing a stack array or a string literal is not a leak but heap corruption:
+ * free() reads the word in front of the pointer as a chunk header, and when
+ * that looks plausible it links the address into a free bin and returns
+ * *normally*. The damage surfaces later, as an abort on an unrelated request.
+ * savemgr.c shipped seven such call sites (one of them a double free) and the
+ * resulting `free(): invalid pointer` landed two requests after the actual
+ * mistake -- see .build/chk_send_buffer.py, which guards this mechanically. */
 enum MHD_Result
 send_buffer(struct MHD_Connection *conn, unsigned int status, char *data,
             const char *mime) {
@@ -531,7 +545,7 @@ count_queue_init(count_queue_t *queue, file_task_t *task) {
     return -1;
   }
   for(i = 0; i < SMALL_COPY_WORKERS; i++) {
-    if(pthread_create(&queue->workers[i], NULL, count_queue_worker, queue)) {
+    if(task_thread_create(&queue->workers[i], count_queue_worker, queue)) {
       queue->stopping = 1;
       pthread_cond_broadcast(&queue->has_work);
       while(queue->worker_count > 0) {
@@ -719,7 +733,7 @@ open_copy_temp(const char *dst, char *temp, size_t temp_size) {
   for(attempt = 0; attempt < 32; attempt++) {
     int fd;
 
-    snprintf(name, sizeof(name), ".wfm-copy-%ld-%lld-%d.tmp",
+    snprintf(name, sizeof(name), ".nex-copy-%ld-%lld-%d.tmp",
              (long)getpid(), (long long)time(NULL), attempt);
     if(path_join(temp, temp_size, parent, name)) {
       return -1;
@@ -1196,7 +1210,7 @@ copy_queue_init(copy_queue_t *queue, file_task_t *task) {
     return -1;
   }
   for(i = 0; i < SMALL_COPY_WORKERS; i++) {
-    if(pthread_create(&queue->workers[i], NULL, copy_queue_worker, queue)) {
+    if(task_thread_create(&queue->workers[i], copy_queue_worker, queue)) {
       queue->stopping = 1;
       pthread_cond_broadcast(&queue->has_work);
       while(queue->worker_count > 0) {
@@ -1511,7 +1525,7 @@ remove_path(file_task_t *task, const char *path) {
 
 /* Run the exact task_worker TASK_DELETE pipeline (count_path_bytes for the
  * entry-count denominator, then remove_path for the actual unlink/rmdir walk)
- * on an explicit path list. The save domain (nexus_port.c save_delete_worker)
+ * on an explicit path list. The save domain (mango_port.c save_delete_worker)
  * calls this instead of its own recursion so that save deletion and the file
  * manager's delete button share ONE proven code path — the save domain kept
  * crashing on-device for reasons the host could not reproduce, and this walk
@@ -1710,7 +1724,7 @@ typedef struct extract_progress_context {
  * The denominator matters as much as the count: with no total the task centre
  * can only print "—", which is why every extraction used to look frozen even
  * while it was working. The engines learn the total during their scan pass, so
- * it is published only from NEXUS_PHASE_EXTRACT onwards — during the scan it is
+ * it is published only from MANGO_PHASE_EXTRACT onwards — during the scan it is
  * still growing and an early, small value would make the bar jump backwards. */
 static int
 extract_progress(int phase, uint64_t done, uint64_t total, const char *current,
@@ -1718,7 +1732,7 @@ extract_progress(int phase, uint64_t done, uint64_t total, const char *current,
   extract_progress_context_t *ctx = arg;
 
   ctx->done = ctx->base + (unsigned long long)done;
-  if(phase != NEXUS_PHASE_SCAN && total)
+  if(phase != MANGO_PHASE_SCAN && total)
     ctx->total = ctx->base + (unsigned long long)total;
   task_set_progress(ctx->task, ctx->done, ctx->total,
                     (current && current[0]) ? current : NULL);
@@ -1736,13 +1750,13 @@ extract_task_worker(file_task_t *task) {
   task_update(task, TASK_RUNNING, task->srcs[0], 0, NULL);
 
   for(i = 0; i < task->src_count; i++) {
-    nexus_extract_req_t req;
-    nexus_extract_result_t result;
-    nexus_err_t err;
+    mango_extract_req_t req;
+    mango_extract_result_t result;
+    mango_err_t err;
 
     memset(&req, 0, sizeof(req));
-    req.conflict = task->extract_overwrite ? NEXUS_CONFLICT_OVERWRITE :
-                                             NEXUS_CONFLICT_FAIL;
+    req.conflict = task->extract_overwrite ? MANGO_CONFLICT_OVERWRITE :
+                                             MANGO_CONFLICT_FAIL;
     req.password = task->password ? task->password : NULL;
     req.progress = extract_progress;
     req.ctx = &context;
@@ -1752,19 +1766,19 @@ extract_task_worker(file_task_t *task) {
     context.total = context.base;
     task_update(task, TASK_RUNNING, task->srcs[i], 0, NULL);
     memset(&result, 0, sizeof(result));
-    err = nexus_extract(task->srcs[i], task->extract_destinations[i],
+    err = mango_extract(task->srcs[i], task->extract_destinations[i],
                         &req, &result);
-    if(err == NEXUS_OK) {
+    if(err == MANGO_OK) {
       context.base = context.done;
       continue;
     }
-    if(err == NEXUS_ERR_CANCELLED || task_cancel_requested(task)) {
+    if(err == MANGO_ERR_CANCELLED || task_cancel_requested(task)) {
       canceled = 1;
       break;
     }
-    if(err == NEXUS_ERR_PASSWORD) {
+    if(err == MANGO_ERR_PASSWORD) {
       task_set_error_code(task, "archive_password_required", task->srcs[i]);
-    } else if(err == NEXUS_ERR_CONFLICT) {
+    } else if(err == MANGO_ERR_CONFLICT) {
       task_set_error_code(task, "archive_conflict", task->extract_destinations[i]);
     } else {
       /* Volume-set failures (missing first part etc.) carry the precise
@@ -2102,7 +2116,7 @@ create_task_response(struct MHD_Connection *conn, task_op_t op,
   return send_buffer(conn, MHD_HTTP_OK, b.data, "application/json");
 }
 
-/* Unified request parameter reader: the NEXUS front-end posts either JSON
+/* Unified request parameter reader: the MANGO front-end posts either JSON
  * (application/json via apiJson) or URL-encoded form (application/x-www-form-
  * urlencoded via apiPost). This tries JSON first, then form, then the GET query
  * string, so any endpoint accepts either encoding. */
@@ -2123,9 +2137,9 @@ req_param(struct MHD_Connection *conn, const char *body, size_t body_size,
   return v;
 }
 
-/* Map an owendswang task_op_t to the NEXUS front-end's task_kind_t numbering
+/* Map an owendswang task_op_t to the MANGO front-end's task_kind_t numbering
  * (0 fetch, 1 extract, 2 upload, 3 install, 4 backup, 5 restore, 6 fPKG copy,
- * 7 delete). Copy/move/chmod have no dedicated NEXUS kind, so they reuse 6. */
+ * 7 delete). Copy/move/chmod have no dedicated MANGO kind, so they reuse 6. */
 static int
 task_kind_of(task_op_t op) {
   switch(op) {
@@ -2141,7 +2155,7 @@ task_kind_of(task_op_t op) {
   }
 }
 
-/* NEXUS task_state_t numbering (QUEUED=0, RUNNING=1, PAUSED=2, DONE=3, FAILED=4,
+/* MANGO task_state_t numbering (QUEUED=0, RUNNING=1, PAUSED=2, DONE=3, FAILED=4,
  * CANCELLED=5). Only the save-manager tracker consumes the numeric state. */
 static int
 task_num_state(task_state_t s) {
@@ -2223,23 +2237,49 @@ api_cancel(struct MHD_Connection *conn, const char *body, size_t body_size) {
 static void *
 stop_websrv_later(void *arg) {
   (void)arg;
+
+  /* 先让 /api/shutdown 的响应发出去：MHD 停服会 join 所有在飞连接，抢在响应
+     之前停会把那个 200 掐掉（前端就报"关闭失败"）。 */
   usleep(250000);
-#ifndef __linux__
-  (void)navigate_to_home();
-  /* Keep this process alive while ShellUI handles the asynchronous URI. */
-  usleep(1000000);
-#endif
+  mango_log("shutdown: 250ms elapsed, stopping webserver now");
+
+  /* ★ 唯一真正让「关闭进程」生效的一步，必须排在最前。
+     ⚠️ 老顺序是 navigate_to_home() 在前、websrv_stop() 在后（v1.0.0 起没动过），
+     而 navigate_to_home 只对真机编译（__linux__ 下整段被跳过）⇒ hosttest 结构上
+     **不可能**覆盖这个顺序。真机上它要走 ShellUI：LoadStartModule 系统模块 +
+     sceUserServiceInitialize + LaunchByUri 等应答，任一步长时间不返回，
+     websrv_stop() 就永远执行不到 —— 进程活着、页面照常响应，而前端早已弹出
+     "进程已关闭"（它发完请求就自己宣布，从不核实）。用户看到的就是
+     "结束了进程，进程又自动启动了"。不变量由 .build/chk_shutdown_order.py 守。 */
   websrv_stop();
+
+#ifndef __linux__
+  /* 回桌面是**装饰**。排在停服之后：它卡住也影响不了停机（进程照常退出，只是
+     不会自动跳回桌面）。main 退出前会留 1 秒有界窗口给它发完那个 URI。 */
+  (void)navigate_to_home();
+#endif
+  mango_log("shutdown: stop armed, thread done");
   return NULL;
 }
 
 enum MHD_Result
 api_exit(struct MHD_Connection *conn, const char *body, size_t body_size) {
-  (void)body; (void)body_size;
   pthread_t thread;
+  int err;
 
-  if(!pthread_create(&thread, NULL, stop_websrv_later, NULL)) {
+  (void)body; (void)body_size;
+
+  err = pthread_create(&thread, NULL, stop_websrv_later, NULL);
+  if(err) {
+    /* ⚠️ 老代码把 pthread_create 的失败**丢掉了**：线程起不来 ⇒ 没人会去调
+       websrv_stop()，而这里照样回 {"ok":true}，前端于是弹出"进程已关闭"。
+       关停请求是最不该被静默吞掉的东西，所以同步把停机标志置上（只
+       shutdown(listen fd)，不碰 MHD，不会和当前这条连接互锁），并记账。 */
+    mango_log("shutdown: pthread_create failed (%d); stopping inline", err);
+    websrv_stop();
+  } else {
     pthread_detach(thread);
+    mango_log("shutdown: requested; stop armed in ~250ms");
   }
   return send_json_ok(conn);
 }
@@ -2493,7 +2533,7 @@ api_launch_elf(struct MHD_Connection *conn, const char *body,
   return result;
 }
 
-/* First present key wins. The NEXUS extract dialog and owendswang's own form
+/* First present key wins. The MANGO extract dialog and owendswang's own form
  * name the same fields differently; accepting both keeps the route working for
  * either front-end instead of silently ignoring the user's choice. */
 static char *
@@ -2506,7 +2546,7 @@ req_param_alias(struct MHD_Connection *conn, const char *body, size_t body_size,
 enum MHD_Result
 api_extract(struct MHD_Connection *conn, const char *body, size_t body_size) {
   char *paths_raw = req_param(conn, body, body_size, "path");
-  /* NEXUS names the fields dst_dir / subdir / conflict; owendswang's form used
+  /* MANGO names the fields dst_dir / subdir / conflict; owendswang's form used
    * destination / separate / overwrite. Read both.
    * ⚠️ 2026-10-01 — reading only the owendswang names meant the folder picked
    * in the 解压到 picker was DISCARDED and every archive was unpacked into its
@@ -2542,7 +2582,7 @@ api_extract(struct MHD_Connection *conn, const char *body, size_t body_size) {
                              "out of memory");
     goto done;
   }
-  /* NEXUS front-end only sends `path` + `password`; default the extraction
+  /* MANGO front-end only sends `path` + `password`; default the extraction
    * destination to the archive's parent directory. */
   if(!destination && count &&
      !path_dirname(paths[0], default_dest, sizeof(default_dest))) {
@@ -2711,13 +2751,13 @@ api_chmod(struct MHD_Connection *conn, const char *body, size_t body_size) {
 }
 
 #ifndef __linux__
-/* 与 pkg_installer.c 的 install_log 同一落点（/data/nexus-install.log）：
+/* 与 pkg_installer.c 的 install_log 同一落点（/data/Mango/logs/mango-install.log）：
  * worker 层只记终态与句柄去向，阶段细节归 pkg_installer.c。fopen/fclose
  * 逐行落盘，任何崩溃都保得住上一行；写失败静默 —— 取证不成为依赖。 */
 static void
 pkg_task_log(const char *fmt, ...) {
   const char *path = getenv("WFM_INSTALL_LOG");
-  char default_path[] = "/data/nexus-install.log";
+  char default_path[] = "/data/Mango/logs/mango-install.log";
   FILE *f;
   va_list ap;
 
@@ -2752,8 +2792,6 @@ pkg_task_worker(void *arg) {
     file_task_t *task;
     pkg_install_handle_t *handle;
     const char *note;
-    int percent = 0;
-    int settled = 0;
 
     pthread_mutex_lock(&g_tasks_lock);
     while(!(task = next_pkg_task_locked())) {
@@ -2768,10 +2806,49 @@ pkg_task_worker(void *arg) {
     task->updated_at = time(NULL);
     pthread_mutex_unlock(&g_tasks_lock);
 
-    handle = pkg_install_begin(task->srcs[0]);
-    if(!handle) {
-      /* Nothing was started: kstuff missing, no authid, unreadable package. The
-       * reason is specific and actionable, so it goes to the user verbatim. */
+  /* Delivery: the file's own path (proven) or a loopback stream uri (opt-in,
+   * not yet verified on hardware). The uri is built BEFORE the install begins
+   * and the publication outlives the call, because InstallByPackage is
+   * asynchronous — the console pulls the bytes after we have returned.
+   * A failed publish is not an error for a LOCAL file: path delivery is a
+   * complete fallback. For a NAS source it IS an error — the installer cannot
+   * open smb://, so "degrade to path delivery" would just hand it garbage. */
+  {
+    char stream_url[1088];
+    int  streamed = 0;
+    int  remote = pkg_src_is_remote(task->srcs[0]);
+
+    if(task->pkg_stream &&
+       (remote ? pkg_stream_prepare_nas(task->srcs[0], stream_url, sizeof(stream_url))
+               : pkg_stream_prepare(task->srcs[0], stream_url, sizeof(stream_url))) == 0) {
+      streamed = 1;
+      pkg_task_log("task %lu delivery=loopback-stream remote=%d uri=%s", task->id,
+                   remote, stream_url);
+    } else if(task->pkg_stream) {
+      if(remote) {
+        pkg_task_log("task %lu FAILED: NAS package unreadable, no path fallback",
+                     task->id);
+        task_set_error_code(task, "pkg_stream_unavailable",
+                            "NAS 上的包无法读取（凭据/共享/网络），流式安装未启动");
+        task_update(task, TASK_FAILED, task->srcs[0], 0,
+                    "NAS package unreadable; streaming install not started");
+        continue;
+      }
+      pkg_task_log("task %lu delivery=path (stream publish failed)", task->id);
+    }
+
+    handle = pkg_install_begin_uri(task->srcs[0], streamed ? stream_url : NULL);
+    if(!handle && streamed) {
+      /* Nothing will ever fetch it: take the offer down now instead of
+       * waiting out the idle timeout. */
+      pkg_stream_unpublish();
+    }
+  }
+  if(!handle) {
+      /* Nothing was started: library load failure, Initialize failure, or
+       * InstallByPackage returned an error. The reason is specific and
+       * actionable (hex code in /data/Mango/logs/mango-install.log), so it goes to the
+       * user verbatim. */
       note = pkg_install_last_error();
       pkg_task_log("task %lu FAILED at begin: %s", task->id,
                    note ? note : "(no reason)");
@@ -2781,43 +2858,26 @@ pkg_task_worker(void *arg) {
       continue;
     }
 
-    /* The console installs in the BACKGROUND: the begin() call returning 0 only
-     * means the download started. Reporting DONE there is exactly how an
-     * install used to be "complete" while no game ever appeared, so the only
-     * accepted terminal state is the console saying the title is playable. */
-    while(!settled) {
-      nexus_err_t err;
-      struct timespec pause = {0, 200L * 1000 * 1000};
-
-      if(task_cancel_requested(task)) {
-        task_update(task, TASK_CANCELED, task->src, 0, "canceled");
-        settled = 1;
-        break;
-      }
-      err = pkg_install_poll(handle, &percent);
-      note = pkg_install_note(handle);
-      task_set_progress(task, (unsigned long long)(percent < 0 ? 0 : percent),
-                        100, note);
-      if(err == NEXUS_ERR_PARTIAL) {
-        nanosleep(&pause, NULL);
-        continue;
-      }
-      if(err == NEXUS_OK) {
-        pkg_task_log("task %lu DONE note=%s", task->id,
-                     note ? note : "-");
-        task_update(task, TASK_DONE, task->src, 0, note);
-      } else {
-        pkg_task_log("task %lu FAILED note=%s", task->id,
-                     note ? note : "(no reason)");
-        task_set_error_code(task, "pkg_install_failed",
-                            note ? note : "package installation failed");
-        task_update(task, TASK_FAILED, task->src, 0,
-                    note ? note : "package installation failed");
-      }
-      settled = 1;
+    /* begin() is now terminal by contract (v1.0.3): NULL = failed to start,
+     * a handle = submitted to the system installer or precheck-skipped. The
+     * console installs in the background; GetInstallStatus polling is gone
+     * (unreferenced status struct, crash suspect), so the task ends HERE and
+     * the note tells the user where the ground truth lives. */
+    note = pkg_install_note(handle);
+    task_set_progress(task, 100, 100, note);
+    if(pkg_install_submitted(handle)) {
+      pkg_task_log("task %lu SUBMITTED note=%s", task->id,
+                   note ? note : "-");
+      task_update(task, TASK_DONE, task->src, 0, note);
+    } else {
+      pkg_task_log("task %lu FAILED note=%s", task->id,
+                   note ? note : "(no reason)");
+      task_set_error_code(task, "pkg_install_failed",
+                          note ? note : "package installation failed");
+      task_update(task, TASK_FAILED, task->src, 0,
+                  note ? note : "package installation failed");
     }
 
-    /* Releases the stream publication and ends the AppInstUtil session. */
     pkg_install_free(handle);
   }
   return NULL;
@@ -2836,9 +2896,9 @@ active_pkg_task_locked(const char *path) {
 #endif
 
 static int
-enqueue_pkg_tasks(char **paths, size_t count, unsigned long *ids) {
+enqueue_pkg_tasks(char **paths, size_t count, unsigned long *ids, int stream) {
 #ifdef __linux__
-  (void)paths; (void)count; (void)ids;
+  (void)paths; (void)count; (void)ids; (void)stream;
   return PKG_INSTALL_UNSUPPORTED;
 #else
   file_task_t **pending = calloc(count, sizeof(*pending));
@@ -2855,6 +2915,7 @@ enqueue_pkg_tasks(char **paths, size_t count, unsigned long *ids) {
     }
     task->op = TASK_PKG_INSTALL;
     task->state = TASK_QUEUED;
+    task->pkg_stream = stream ? 1 : 0;
     task->src_count = 1;
     snprintf(task->src, sizeof(task->src), "%s", paths[i]);
     task->created_at = time(NULL);
@@ -2927,7 +2988,7 @@ api_install_pkg(struct MHD_Connection *conn, const char *body,
     }
   }
 
-  result = enqueue_pkg_tasks(paths, count, ids);
+  result = enqueue_pkg_tasks(paths, count, ids, 0);
   free(paths_raw); free_paths(paths, count);
   if(result == PKG_INSTALL_UNSUPPORTED) {
     free(ids);
@@ -2956,7 +3017,7 @@ api_install_pkg(struct MHD_Connection *conn, const char *body,
 enum MHD_Result
 filemgr_api_request(struct MHD_Connection *conn, const char *url,
                     const char *method, const char *body, size_t body_size) {
-  /* NEXUS front-end route names (preferred) and owendswang legacy aliases. */
+  /* MANGO front-end route names (preferred) and owendswang legacy aliases. */
   if(!strcmp(url, "/api/fs/list") || !strcmp(url, "/api/list"))
     return api_list(conn, body, body_size);
   if(!strcmp(url, "/api/fs/read") || !strcmp(url, "/api/text"))
@@ -2972,27 +3033,27 @@ filemgr_api_request(struct MHD_Connection *conn, const char *url,
   if(!strcmp(url, "/api/status")) return api_status(conn, body, body_size);
   if(!strcmp(url, "/api/fetch")) return api_fetch(conn, body, body_size);
   if(!strcmp(url, "/api/nas/copy")) return api_nas_copy(conn, body, body_size);
+  if(!strcmp(url, "/api/nas/delete"))
+    return api_nas_delete(conn, body, body_size);
   if(!strcmp(url, "/api/save/scan")) return api_save_scan(conn, body, body_size);
+  if(!strcmp(url, "/api/save/users")) return api_save_users(conn, body, body_size);
   if(!strcmp(url, "/api/save/list")) return api_save_list(conn, body, body_size);
   if(!strcmp(url, "/api/save/backup")) return api_save_backup(conn, body, body_size);
   if(!strcmp(url, "/api/save/restore")) return api_save_restore(conn, body, body_size);
   if(!strcmp(url, "/api/save/delete")) return api_save_delete(conn, body, body_size);
   if(!strcmp(url, "/api/save/snapdelete")) return api_save_snapdelete(conn, body, body_size);
-  /* save-manager (import / replace / export) — see src/savemgr.c */
-  if(!strcmp(url, "/api/save_mgr/list")) return api_save_mgr_list(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/mount")) return api_save_mgr_mount(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/unmount")) return api_save_mgr_unmount(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/files")) return api_save_mgr_files(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/read")) return api_save_mgr_read(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/write")) return api_save_mgr_write(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/upload")) return api_save_mgr_upload(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/import_zip")) return api_save_mgr_import_zip(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/import_encrypted")) return api_save_mgr_import_encrypted(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/import_finish")) return api_save_mgr_import_finish(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/create_pfs")) return api_save_mgr_create_pfs(conn, url, body, body_size);
-  if(!strcmp(url, "/api/save_mgr/export")) return api_save_mgr_export(conn, url, body, body_size);
-  if(!strcmp(url, "/api/pkg/scan")) return api_pkg_scan(conn, body, body_size);
+  /* save-manager (import / replace / export) — see src/savemgr.c.
+   * 整段交给 dispatch_save_mgr()：它在进程级锁下串行执行（对齐参考的存档管理
+   * 器——它把每个 /api/ 请求都放在同一把互斥锁里），只有 import_log 例外。 */
+  if (!strncmp(url, "/api/save_mgr/", 14))
+    return dispatch_save_mgr(conn, url, body, body_size);
+  if (!strcmp(url, "/api/pkg/scan")) return api_pkg_scan(conn, body, body_size);
   if(!strcmp(url, "/api/pkg/enqueue")) return api_pkg_enqueue(conn, body, body_size);
+  if(!strcmp(url, "/api/pkg/uninstall")) {
+    return strcmp(method, MHD_HTTP_METHOD_POST) ?
+      send_json_error(conn, MHD_HTTP_METHOD_NOT_ALLOWED, "invalid method") :
+      api_pkg_uninstall(conn, body, body_size);
+  }
   if(!strcmp(url, "/api/pkg/install-url")) {
     return strcmp(method, MHD_HTTP_METHOD_POST) ?
       send_json_error(conn, MHD_HTTP_METHOD_NOT_ALLOWED, "invalid method") :
@@ -3010,6 +3071,7 @@ filemgr_api_request(struct MHD_Connection *conn, const char *url,
   }
   if(!strcmp(url, "/api/upload/prepare")) return api_upload_prepare(conn, body, body_size);
   if(!strcmp(url, "/api/upload/finish")) return api_upload_finish(conn);
+  if(!strcmp(url, "/api/upload/progress")) return api_upload_progress(conn);
   if(!strcmp(url, "/api/rename")) return api_rename(conn, body, body_size);
   if(!strcmp(url, "/api/mkdir")) return api_mkdir(conn, body, body_size);
   if(!strcmp(url, "/api/launch-elf")) {
@@ -3028,7 +3090,7 @@ filemgr_api_request(struct MHD_Connection *conn, const char *url,
       api_extract(conn, body, body_size);
   }
   if(!strcmp(url, "/api/pkg-info") || !strcmp(url, "/api/pkg/info")) {
-    /* The NEXUS front-end POSTs this with a form body; GET with ?path= is kept
+    /* The MANGO front-end POSTs this with a form body; GET with ?path= is kept
      * as an alias. */
     return api_pkg_info(conn, body, body_size);
   }
@@ -3053,21 +3115,41 @@ filemgr_api_request(struct MHD_Connection *conn, const char *url,
   return send_json_error(conn, MHD_HTTP_NOT_FOUND, "unknown api");
 }
 
-/* The NEXUS-only endpoints (/api/status, /api/app/register, /api/fetch, the
- * save routes, the pkg routes and /api/install/poll) live in nexus_port.c. */
+/* The MANGO-only endpoints (/api/status, /api/app/register, /api/fetch, the
+ * save routes, the pkg routes and /api/install/poll) live in mango_port.c. */
 
 /* Queue a single Sony .pkg for installation through the shared PKG worker.
- * Exposed for nexus_port.c so /api/pkg/enqueue reuses the same queue as
+ * Exposed for mango_port.c so /api/pkg/enqueue reuses the same queue as
  * /api/install-pkg instead of opening a second one. */
-int
-filemgr_queue_pkg(const char *path, unsigned long *out_id) {
+static int
+queue_one_pkg(const char *path, unsigned long *out_id, int stream) {
   char *paths[1];
   unsigned long ids[1] = {0};
   int result;
 
   if(!path || !*path) return -1;
   paths[0] = (char *)path;
-  result = enqueue_pkg_tasks(paths, 1, ids);
+  result = enqueue_pkg_tasks(paths, 1, ids, stream);
   if(!result && out_id) *out_id = ids[0];
   return result;
+}
+
+int
+filemgr_queue_pkg(const char *path, unsigned long *out_id) {
+  return queue_one_pkg(path, out_id, 0);
+}
+
+int
+filemgr_queue_pkg_stream(const char *path, unsigned long *out_id) {
+  return queue_one_pkg(path, out_id, 1);
+}
+
+/* A remote source (smb:// / nfs:// URL or a UNC-style //host/share path).
+ * Used by the install worker: remote packages MUST stream, there is no
+ * path-delivery fallback the installer could accept. */
+int
+pkg_src_is_remote(const char *path) {
+  if(!path) return 0;
+  return !strncmp(path, "smb://", 6) || !strncmp(path, "nfs://", 6) ||
+         (!strncmp(path, "//", 2) && path[2] && path[2] != '/');
 }

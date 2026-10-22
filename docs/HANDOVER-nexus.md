@@ -1,9 +1,9 @@
-# PS5 Nexus — HANDOVER（交接文档，权威）
+# PS5 Mango — HANDOVER（交接文档，权威）
 
-> ⚠️ **本文档描述的是 `ps5-nexus` 那棵树（"重写"路线的设计文档），不是本仓库。**
+> ⚠️ **本文档描述的是 `ps5-mango` 那棵树（"重写"路线的设计文档），不是本仓库。**
 > 本仓库是另一条路线：以 **owendswang/ps5-web-file-manager 最新版后端**为底座，
-> 搬入 NEXUS 的前端 UI 与 PKG / 存档能力，产物 `PS5-Nexus-v1.0.0.elf`，端口 `2026`。
-> 因此本文里的**文件路径、模块划分、ELF 名（`ps5-nexus`）都不适用于本仓**；
+> 搬入 MANGO 的前端 UI 与 PKG / 存档能力，产物 `PS5-Mango-v1.0.0.elf`，端口 `2026`。
+> 因此本文里的**文件路径、模块划分、ELF 名（`ps5-mango`）都不适用于本仓**；
 > 保留它只为设计理由与坑清单（机理、取证）。仓库外的引用
 > （`../ps5-nas-rewrite-proposal.html`、`../ps5-ui-demo-*.html`）不在本仓内。
 > **本仓的现状看 `README.md` 与 `REAL-CONSOLE-CHECKLIST.md`。**
@@ -17,7 +17,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| 名称 / 仓库 / ELF | **PS5 Nexus** / `ps5-nexus` / `ps5-nexus` |
+| 名称 / 仓库 / ELF | **PS5 Mango** / `ps5-mango` / `ps5-mango` |
 | 默认端口 | **2026**（避开 8888/9021/9090·12800/1337/9081） |
 | 形态 | 单 ELF + 端口 + gzip 内嵌前端，**纯网页、不写 app/Electron** |
 | 四个能力域 | ① NAS 互通 ② 解压引擎（7z/RAR/ZIP + 加密 + 分卷）③ 大文件吞吐与续传 ④ 存档管理（P1） |
@@ -38,11 +38,12 @@
 | 复制测试过的叶子模块 | ✅ | `src/` 29 文件：解压引擎（extract/zip/rar/zipx/sevenz 全套）+ `json_util` + `path_util` + `pkg_info`（SFO 解析） |
 | 复制 vendored 依赖 | ✅ | `third_party/minizip-ng`（11 src）+ `third_party/unrar7`（161 文件） |
 | 复制测试矩阵 | ✅ | `tests/` 66 文件（run-tests.sh / run-sevenz-tests.sh / 兼容头 / test_*.c / fixtures / 夹具生成器） |
-| 移植构建工具链 | ✅ | `Makefile`（身份改 `ps5-nexus` / `v0.1.0` / 模块集 TODO + flag-stamp TODO）+ `gen-asset-module.py` + `install-libmicrohttpd.sh` + `.build/*.sh/*.py/*.mjs` 验收工具 |
+| 移植构建工具链 | ✅ | `Makefile`（身份改 `ps5-mango` / `v0.1.0` / 模块集 TODO + flag-stamp TODO）+ `gen-asset-module.py` + `install-libmicrohttpd.sh` + `.build/*.sh/*.py/*.mjs` 验收工具 |
 | 播种 Harness 前端 | ✅ | `assets/index.html`（= demo5 全量单文件，可直接打开）+ `install.html`（E 首屏）+ `main.css`（37KB 冻结令牌/组件）+ `main.js`（8.5KB）+ `lang-zh.js` / `lang-en.js`（i18n 桩） |
-| 低耦合接口占位 | ✅ | `src/*.h` 契约：`nexus_common` + `httpd` + `task_engine` + `transfer` + `pkg_installer` + `pkg_lib` + `copypipe` + `savemgr` |
+| 低耦合接口占位 | ✅ | `src/*.h` 契约：`mango_common` + `httpd` + `task_engine` + `transfer` + `pkg_installer` + `pkg_lib` + `copypipe` + `savemgr` |
 | 本地 git 提交 | ✅ | `cc6237d`（318）+ `741fe86`（94）＝ 2 个提交，本地 `master` 分支 |
-| 推送 GitHub | ✅ | remote `origin`=`https://github.com/LisherSong/ps5-nexus.git`（公开，GPL-3.0）；`master→main` **零分叉已推**，远端 429 文件 = 本地 HEAD `741fe86` |
+| 推送 GitHub | ✅ | remote `origin`=`https://github.com/LisherSong/ps5-nexus.git`（GPL-3.0）；`master→main` **零分叉已推**，远端 429 文件 = 本地 HEAD `741fe86` |
+| 仓库转私有 ⚠️ | ✅ | **2026-10-11 由 public 改为 private**（用户拍板：等功能全可用再公开）。当前远端 `main` 停在 `e56cae8`（2026-10-03），**是本地 HEAD 的纯祖先、落后 7 个提交** —— 远端那份**不含** v1.0.4 之后的修复（含「导入进度弹窗永远空白」「结束进程无限自启」）。0 fork / 0 star / 0 issue / 无 Release。**发布时改回 public 即可**（历史与仓库名保留，不必重建）；`gh api -X PATCH repos/LisherSong/ps5-nexus -F private=true` |
 
 **未动（刻意）**：旧仓高耦合编排层（main/websrv/filemgr/upload/download/task/pkg_installer/app_installer 等）——按「低耦合重写」原则**不复制**，由后续 Phase 按契约头文件重新实现。
 
@@ -70,7 +71,7 @@ CODEBUDDY_SAFE_DELETE_ENABLED=0 bash tests/run-sevenz-tests.sh  # 7z
 
 | 任务 | 状态 | 交付物 / 结果 |
 | --- | --- | --- |
-| 建远端仓库 | ✅ | `gh repo create ps5-nexus --public`（owner **LisherSong**，因上游 `ps5-web-file-manager` 即公开 GPL-3.0；需私有可 `gh repo edit` 翻转） |
+| 建远端仓库 | ✅ | `gh repo create ps5-mango --public`（owner **LisherSong**，因上游 `ps5-web-file-manager` 即公开 GPL-3.0；需私有可 `gh repo edit` 翻转） |
 | 推送提交 | ✅ | `git remote add origin …` + `GIT_SSL_NO_VERIFY=1 git push -u origin master:main` ⇒ **EXIT=0，零分叉**：远端 `main`=`741fe8635…`=本地 HEAD；远端 2 提交、429 文件 |
 | 后续推送方式 | ✅ | **本次实测 `github.com:443` 已可达（curl 返回 200）**，故直接 `git push` + `GIT_SSL_NO_VERIFY=1` 即通；若日后 egress 又把 `github.com:443` 挡死（TCP 连不上、非证书），退回 **Git Data API** 通路（blob/tree/commit 逐字节同 sha 闸门，见用户级 MEMORY.md） |
 
@@ -86,7 +87,7 @@ CODEBUDDY_SAFE_DELETE_ENABLED=0 bash tests/run-sevenz-tests.sh  # 7z
 | --- | --- | --- | --- |
 | `src/task_engine.c` | A 本机 | ✅ | 统一任务中心：create/set_total/set_progress/set_state/cancel/recover + 扩展（worker 轮询 `task_cancelled`、JSON 快照供 UI、journal 路径）。跨重启恢复用 5 字段定长 journal（label 放最后含空格）。**测试 15/15** |
 | `src/copypipe.c` | A 本机 | ✅ | 8 MiB 暂存 + 原子 commit（`<dst>.part` → rename；Windows 走 `MoveFileEx REPLACE_EXISTING`，因 `rename` 不覆盖已存在文件）；close 未 commit 则丢弃临时文件。**测试 22/22** |
-| `src/transfer.c` | A 本机 | ✅ | local 后端（list/read/close）；`smb`/`nfs` 用 `NEXUS_HAVE_LIBSMB2`/`NEXUS_HAVE_LIBNFS` 守卫，缺库时 `transfer_open` 返回 **NULL**（不是静默空实现）。**测试 17/17** |
+| `src/transfer.c` | A 本机 | ✅ | local 后端（list/read/close）；`smb`/`nfs` 用 `MANGO_HAVE_LIBSMB2`/`MANGO_HAVE_LIBNFS` 守卫，缺库时 `transfer_open` 返回 **NULL**（不是静默空实现）。**测试 17/17** |
 | `src/pkg_sfo.c` | A 本机 | ✅ | **新写**（替代 `pkg_info.c`）：自包含解析 PKG 容器（入口表 + PARAM.SFO/param.json），取 title_id/title/version/size/content_id + icon 偏移；含 icon 抽取（复用 copypipe 原子落盘）。**测试 22/22** |
 | `src/pkg_lib.c` | A 本机 | ✅ | 递归深扫 `.pkg` → 索引；`pkg_lib_enqueue` 把安装任务推入统一任务中心（队列自动推进）。**测试 22/22** |
 | `src/httpd.c` | B SDK | ✅ 已写 | libmicrohttpd 封装：路由表 + 运行时端口探测（顺延直到绑定成功）+ `httpd_port()` 上报 + 静态回退钩。**本机无 libmicrohttpd，未编译** |
@@ -106,7 +107,7 @@ CODEBUDDY_SAFE_DELETE_ENABLED=0 /usr/bin/bash tests/run-orchestration-tests.sh
 - **`rename()` 在 Windows 不覆盖已存在文件** ⇒ 原子替换必须 `MoveFileExA(..., MOVEFILE_REPLACE_EXISTING)`，否则 commit 覆盖旧档会失败。
 - **`strncpy` 截断告警**（`-Wextra`）在 `transfer`/`pkg_lib` 里会响 ⇒ 用「strlen 后 clamp + memcpy」替代，别靠 strncpy 补零。
 - **宿主测试别碰 opaque 结构体字段**（`task_handle_t`）⇒ 行为断言走 JSON 快照，不直接读 `t->state`。
-- **`pkg_info.c` 不能进构建**：它 include 了未继承的 `websrv.h` / `filemgr_internal.h`；其解析逻辑已由 `pkg_sfo.c` 重写并去耦（且可本机测试）。`extract.c`（旧 MHD 端点）同理，等改成 nexus 路由再入。
+- **`pkg_info.c` 不能进构建**：它 include 了未继承的 `websrv.h` / `filemgr_internal.h`；其解析逻辑已由 `pkg_sfo.c` 重写并去耦（且可本机测试）。`extract.c`（旧 MHD 端点）同理，等改成 mango 路由再入。
 
 ## 1e. 当前进度（Session 6，2026-09-27）：JSON API 层 + 平台状态
 
@@ -118,7 +119,7 @@ CODEBUDDY_SAFE_DELETE_ENABLED=0 /usr/bin/bash tests/run-orchestration-tests.sh
 | `src/platform.c/.h` | A 本机 | ✅ | kstuff 判定**只看磁盘路径**（`/proc/kstuff` → `autoload.txt` → `/data/etaHEN` + `no_kstuff` 哨兵）；端口运行时上报；本机 IPv4（PS5/Unix 走 `getifaddrs`，Windows 走 `getaddrinfo`）；SMB/NFS 报**后端是否编入** |
 | `src/task_engine.c` | A 本机 | ✅ 增补 | `task_id()` / `task_find(id)`（取消要按 id 找）；快照带 `ok`。**句柄绝不过 HTTP 边界** |
 | `src/main.c` | B SDK | ✅ 重写 | **不再含任何 handler**：只遍历 `api_routes[]` 注册；启动后 `platform_set_http_port(httpd_port())` 并打印 `http://addr:port` |
-| `src/stubs_nops5.c` | linux | ✅ 新增 | linux 目标专用桩——两个 SDK 域**一律返回 `NEXUS_ERR_UNSUPPORTED`**，绝不假装可用 |
+| `src/stubs_nops5.c` | linux | ✅ 新增 | linux 目标专用桩——两个 SDK 域**一律返回 `MANGO_ERR_UNSUPPORTED`**，绝不假装可用 |
 | `Makefile` | — | ✅ | `api`/`platform` 入 COMMON；**安装/存档移出 COMMON 进 `PS5_SRCS`**（否则 linux 目标编不过）；**第一方 CFLAGS flag-stamp**（只改 `-D`/`-I`/`LDADD` 时 make 不会重链，新功能会静默消失） |
 
 **测试**：5 套件 **184 项断言全绿**（原 76 + api 108）。跑法不变：
@@ -130,7 +131,7 @@ CODEBUDDY_SAFE_DELETE_ENABLED=0 /usr/bin/bash tests/run-orchestration-tests.sh
 - **两套桩职责不同，别混**：`tests/stubs_ps5.c` 是**记录式桩**（记参数、返回 OK，用来断言「路由有没有走到正确的模块」）；`src/stubs_nops5.c` 是**诚实桩**（返回 `UNSUPPORTED`，让 linux 二进制链接且报「此处不可用」）。二者返回相反，混淆会让测试或 linux 构建之一说谎。
 - **让 `api.c` 不 include `httpd.h`**：路由表由 `main.c` 注册（handler 签名与 `http_handler_fn` 一致，可直接传）⇒ api 层零 socket 依赖、宿主可测。
 - **`mkdir` 参数个数平台不同**（Windows 1 个、POSIX 2 个）⇒ 收敛到 `ensure_dir()`。
-- **数组判空恒真**：`if(!nexus_assets)` 触发 `-Waddress`（`nexus_assets` 是数组）⇒ 删判空，靠 `a->path` 终止。
+- **数组判空恒真**：`if(!mango_assets)` 触发 `-Waddress`（`mango_assets` 是数组）⇒ 删判空，靠 `a->path` 终止。
 - **Windows 下地址探测要 `-lws2_32`** ⇒ 跑批脚本按 `uname -s` 自动加。
 - JSON 里 `\uXXXX` 不解码的话，中文游戏名会原样进 UI；`\u` 还得处理**代理对**（emoji）。
 
@@ -144,7 +145,7 @@ Session 6 结束时 `/api/extract` 与 `/api/install/begin` **只入队、任务
 | --- | --- | --- | --- |
 | `src/worker.c/.h` | A 本机 | ✅ 新增 | 单线程 **tick 驱动**（`worker_tick()` 由 main 循环调）；4 个槽位并发；按 kind 分派 fetch/install/extract/backup/**restore**；轮询 `task_cancelled()`。`worker_shutdown()` **只丢弃、绝不 commit** 半截产物。**测试 19/19** |
 | `src/task_engine.c` | A 本机 | ✅ 增补 | `task_payload_t`（`src_path`/`dst_path`/`scheme`/`snapshot`）+ `task_set_payload`/`task_payload` ⇒ **worker 才知道该干什么**；`task_kind_of` 公开 |
-| `src/nexus_common.h` | A 本机 | ✅ 增补 | `TASK_KIND_RESTORE` 补上（恢复与备份是两条独立路径，共用一个 kind 会让回滚语义含糊） |
+| `src/mango_common.h` | A 本机 | ✅ 增补 | `TASK_KIND_RESTORE` 补上（恢复与备份是两条独立路径，共用一个 kind 会让回滚语义含糊） |
 | `src/transfer.c/.h` | A 本机 | ✅ 增补 | `transfer_size()` —— worker 要提前知道总字节才能报进度（`task_set_total`） |
 | `src/api.c` | A 本机 | ✅ 改写 | 安装/备份/恢复**统一改成「入队 + worker 驱动」**；新增 `/api/fetch`（NAS 拉取）。**入队不再触碰数据源** ⇒ 缺库/坏参的失败改在 worker 里以「任务失败」暴露（更贴近 UI 看到的样子） |
 | `src/extract_engine.h` | — | ✅ 新增 | 解压引擎契约头（worker 只依赖契约，不依赖具体 zip/rar/7z 实现） |
@@ -164,30 +165,30 @@ Session 6 结束时 `/api/extract` 与 `/api/install/begin` **只入队、任务
 
 ## 1g. 当前进度（Session 8，2026-09-27）：解压引擎接进 worker（续被中断的工作）
 
-Session 7 结束时 worker 的 `step_extract` 还是占位，调的是旧签名 `nexus_extract(path, dst, conflict, password, progress, ctx)`（还没有真适配器）。本档把继承来的 zip/rar/7z 叶子按契约接上——**密码/分卷路径全部贯通**（相对竞品的真真空），并让失败带原因回 UI。
+Session 7 结束时 worker 的 `step_extract` 还是占位，调的是旧签名 `mango_extract(path, dst, conflict, password, progress, ctx)`（还没有真适配器）。本档把继承来的 zip/rar/7z 叶子按契约接上——**密码/分卷路径全部贯通**（相对竞品的真真空），并让失败带原因回 UI。
 
 | 模块 | 档 | 状态 | 交付 / 结果 |
 | --- | --- | --- | --- |
-| `src/extract_engine.c` | A 本机 | ✅ 新增 | 传输无关适配器 `nexus_extract()`：按扩展名分派 zip/rar/7z，卷组检测，唯一诚实拒收（`x.rar.001` 字节切分，unrar 无法打开）；`zipx_status_t → nexus_err_t` 映射。分派规则是旧 MHD 端点 `extract_dispatch()` 的直接移植（真机验过的） |
-| `src/extract_engine.h` | — | ✅ 改写 | 新契约：`nexus_extract_req_t`（conflict/password/**large**/progress/cancel/ctx）+ `nexus_extract_result_t`（err + 人类可读 message）。worker 只依赖此契约，永不接触 `zipx_status_t` |
-| `src/nexus_common.h` | A | ✅ 增补 | `NEXUS_ERR_PASSWORD = -8` / `NEXUS_ERR_CONFLICT = -9`（密码是解压首试失败的唯一大原因，UI 要能区分） |
+| `src/extract_engine.c` | A 本机 | ✅ 新增 | 传输无关适配器 `mango_extract()`：按扩展名分派 zip/rar/7z，卷组检测，唯一诚实拒收（`x.rar.001` 字节切分，unrar 无法打开）；`zipx_status_t → mango_err_t` 映射。分派规则是旧 MHD 端点 `extract_dispatch()` 的直接移植（真机验过的） |
+| `src/extract_engine.h` | — | ✅ 改写 | 新契约：`mango_extract_req_t`（conflict/password/**large**/progress/cancel/ctx）+ `mango_extract_result_t`（err + 人类可读 message）。worker 只依赖此契约，永不接触 `zipx_status_t` |
+| `src/mango_common.h` | A | ✅ 增补 | `MANGO_ERR_PASSWORD = -8` / `MANGO_ERR_CONFLICT = -9`（密码是解压首试失败的唯一大原因，UI 要能区分） |
 | `src/task_engine.c/.h` | A | ✅ 增补 | `task_payload_t` 加 `password[128]` + `large`（**内存内，绝不入 journal**）；`task_set_note`/`task_note`——失败原因随 JSON 快照带 `"note"` 字段给 UI |
 | `src/worker.c` | A | ✅ 改写 | `step_extract` 走新契约：password/large 透传、progress→`task_set_progress`、独立 `on_extract_cancel` 轮询通道（引擎轮询 cancel 比报进度勤得多，取消落得快）；失败时 `task_set_note(res.message)` 再 FAILED |
 | `src/api.c` | A | ✅ 增补 | `/api/extract` 收 `password`/`large`（`"1"`/`"true"` 视为开）；`copy_clamp` 按 sizeof 截断到 128 |
-| `src/stubs_nops5.c` | linux | ✅ 改 | **`nexus_extract` 不再桩掉**——`extract_engine.c` 是纯 POSIX、每个目标都能编；桩掉会在 linux 构建上静默禁用解压 |
+| `src/stubs_nops5.c` | linux | ✅ 改 | **`mango_extract` 不再桩掉**——`extract_engine.c` 是纯 POSIX、每个目标都能编；桩掉会在 linux 构建上静默禁用解压 |
 | `Makefile` | — | ✅ | `extract_engine.c` 入 `COMMON_SRCS` |
 | `tests/stubs_engines.c` | A | ✅ 新增 | **与 stubs_ps5.c 职责相反**的记录式桩：替 zip/rar/7z，让适配器套件免拖 zlib/minizip-ng/unrar7 |
 | `tests/test_extract_engine.c` | A | ✅ 新增 | 40 项：分派（含大写 .ZIP、未知扩展、无扩展名）、参数透传（password/conflict/dst/large/profile）、progress+cancel 接通、状态映射、rar.001 拒收。**所有 .zip 路径用真实（空）文件** |
-| `tests/run-orchestration-tests.sh` | A | ✅ 重构 | `CORE` 与 `WORKER_OBJS` 分离：worker.o 拖 SDK 域 → 与 stubs_ps5 捆绑；extract_engine 套件只链真实适配器 + stub 引擎（stubs_ps5 的 nexus_extract 会撞符号） |
+| `tests/run-orchestration-tests.sh` | A | ✅ 重构 | `CORE` 与 `WORKER_OBJS` 分离：worker.o 拖 SDK 域 → 与 stubs_ps5 捆绑；extract_engine 套件只链真实适配器 + stub 引擎（stubs_ps5 的 mango_extract 会撞符号） |
 
 **测试**：7 套件 **266 项断言全绿**（原 222 + worker +4 密码/原因 + extract_engine 40）。跑法不变。
 
 **本档关键坑（新踩，含被打断时踩的）**
 - **`zipx_volume_detect` 会 stat `.zip` 名并扫兄弟分卷**：假路径返回"卷不完整"而非"单文件" ⇒ 适配器测试必须 `touch()` 造真实（空）文件，不能写假路径。
 - **入队不再触碰数据源，失败只在 worker 暴露**：两处旧断言（`/api/fetch` smb 缺库 → HTTP `ok:false`、installer 拒绝 → `ok:false`）按新语义改成断言任务 `failed`——UI 看到的就是任务失败，改断言不改实现。
-- **两个桩文件职责相反、只能各归其位**：`stubs_ps5.c`（记录式，断言路由/worker 走到对模块）与 `stubs_engines.c`（记录式，断言适配器分派）都定义 `nexus_extract`/引擎符号 ⇒ 一个套件只能链 {extract_engine.o} 或 {stubs_ps5.o} 之一，绝不能都链。
-- **`nexus_extract` 不能进 stubs_nops5.c**：诚实桩按模块缺什么补什么；extract 是真实 POSIX 代码，桩掉 = linux 构建上解压静默不可用。
-- **rar.001 拒收收窄了**：旧 MHD 端点拒收一切 rar 卷组；引擎本身能正确合并 `x.partNN.rar`（`test_rar_extract.c` 对真实夹具断言过）⇒ Nexus 只拒收引擎真打不开的命名（字节切分 `x.rar.001`），并给用户改名指引。
+- **两个桩文件职责相反、只能各归其位**：`stubs_ps5.c`（记录式，断言路由/worker 走到对模块）与 `stubs_engines.c`（记录式，断言适配器分派）都定义 `mango_extract`/引擎符号 ⇒ 一个套件只能链 {extract_engine.o} 或 {stubs_ps5.o} 之一，绝不能都链。
+- **`mango_extract` 不能进 stubs_nops5.c**：诚实桩按模块缺什么补什么；extract 是真实 POSIX 代码，桩掉 = linux 构建上解压静默不可用。
+- **rar.001 拒收收窄了**：旧 MHD 端点拒收一切 rar 卷组；引擎本身能正确合并 `x.partNN.rar`（`test_rar_extract.c` 对真实夹具断言过）⇒ Mango 只拒收引擎真打不开的命名（字节切分 `x.rar.001`），并给用户改名指引。
 - **密码只存内存**：`task_payload_t.password` 与 `note` 都不进 5 字段 journal（journal 只写 id/kind/state/total/progress/label）——重启恢复的任务不再携带密码。
 
 ---
@@ -287,7 +288,7 @@ Session 9 已接顶栏/任务/解压提交；本档把**文件视图**与**解�
 
 **transfer 接 smb/nfs —— 本机可行性评估（诚实结论）**
 - **探针**：宿主只有 `mingw32-make`；`cmake` / `autoconf` / `automake` / `libtoolize` 全部缺席 ⇒ **libsmb2（CMake + autotools）与 libnfs（autotools）在本机无法 configure/构建**；且无 PS5 Payload SDK，prospero 编译无从验证。
-- **处理**：`NEXUS_HAVE_LIBSMB2` / `NEXUS_HAVE_LIBNFS` **保持未定义**（`transfer_open` 对 smb/nfs 返回 NULL——已有测试钉死「干净失败，不静默空实现」）；新增 `transfer_scheme_supported` 把失败原因说清楚。**不硬造假实现、不写无法验证的后端代码**。
+- **处理**：`MANGO_HAVE_LIBSMB2` / `MANGO_HAVE_LIBNFS` **保持未定义**（`transfer_open` 对 smb/nfs 返回 NULL——已有测试钉死「干净失败，不静默空实现」）；新增 `transfer_scheme_supported` 把失败原因说清楚。**不硬造假实现、不写无法验证的后端代码**。
 - **SDK 机步骤（文档即交付）**：① 抓 libsmb2 源码（其 SMB 协议实现是 elf-arsenal 的同源参考）与 libnfs 源码入 `third_party/`；② 按 prospero-clang 工具链移植（socket/poll/getaddrinfo 需过 SDK sysroot）；③ Makefile `THIRD_PARTY_C_SRCS` 增补 + 定义两宏；④ 实现 `transfer.c` 里每个 scheme 的四个函数（open/list/read/size）——local 后端与既有测试用例**一行不用改**；⑤ SDK 机 `make` 验证。
 
 ---
@@ -323,9 +324,9 @@ Session 9 已接顶栏/任务/解压提交；本档把**文件视图**与**解�
 | --- | --- |
 | `third_party/libsmb2/` | vendor **libsmb2 v6.0.0** 源码（48 .c 全在 `lib/`）+ 手写 `config.h`（FreeBSD 最小集，模板 `include/apple/config.h`；undef krb5/libnsl/libsocket） |
 | `third_party/libnfs/` | vendor **libnfs 8.0.0** 源码（`lib/`+`mount/nfs/nfs4/nlm/nsm/portmap/rquota` 8 目录，排除 tls/aros/ps2_ee/ps3_ppu/win32）+ 手写 `config.h`（模板 `cmake/config.h.cmake`；undef NFS4_2/MULTITHREADING/KRB5/TLS/SYS_VFS 等） |
-| `Makefile` | `LIBSMB2 ?= 0` / `LIBNFS ?= 0`（**默认关**，host 构建/测试零影响）；条件并入 `THIRD_PARTY_C_SRCS`；**per-target flag 覆盖**（`ps5-obj/third_party/libsmb2/%.o` 等目标特定变量）把 `-DHAVE_CONFIG_H` 限定在对应 TU，防泄漏给 zlib/minizip/7z；第一方 `CFLAGS`/`LINUX_CFLAGS` 条件加 `-DNEXUS_HAVE_LIBSMB2/-DNEXUS_HAVE_LIBNFS` + 头路径（只有 transfer.c 读） |
-| `src/transfer.h` | `transfer_nas_t { server[256]; share[256]; path[NEXUS_PATH_MAX] }`（share = smb share 名或 nfs export 名 verbatim）；`transfer_url_parse()` 声明（纯字符串、宏外编译、全构建 host 可测） |
-| `src/transfer.c` | `transfer_url_parse()` 纯函数（`smb://`、`nfs://`、`//host/share`、裸 `host/share`、`host:/export` 五种形式；空 server/share、尾冒号、绝对路径、NULL 均拒绝；尾路径允许空 = share 根）；`list_push()` 共享 helper（local/smb/nfs 三后端复用）；宏守卫下 smb（`smb2_init_context`→`smb2_connect_share(ctx,server,share,NULL)`→`smb2_opendir/readdir/stat/pread`）+ nfs（**`nfsio_*` 前缀**——`nfs_read`/`nfs_close` 是 libnfs 公开符号名；`nfs_init_context`→`nfs_mount(server, export_name)`，share 无前导 `/` 时补 `"/"`）四函数；`transfer_open` **惰性连接**（只验 URL 形状，连接错误在首次 list/read/size 以 NEXUS_ERR_NOTFOUND 浮出，镜像 local fd 惰性开） |
+| `Makefile` | `LIBSMB2 ?= 0` / `LIBNFS ?= 0`（**默认关**，host 构建/测试零影响）；条件并入 `THIRD_PARTY_C_SRCS`；**per-target flag 覆盖**（`ps5-obj/third_party/libsmb2/%.o` 等目标特定变量）把 `-DHAVE_CONFIG_H` 限定在对应 TU，防泄漏给 zlib/minizip/7z；第一方 `CFLAGS`/`LINUX_CFLAGS` 条件加 `-DMANGO_HAVE_LIBSMB2/-DMANGO_HAVE_LIBNFS` + 头路径（只有 transfer.c 读） |
+| `src/transfer.h` | `transfer_nas_t { server[256]; share[256]; path[MANGO_PATH_MAX] }`（share = smb share 名或 nfs export 名 verbatim）；`transfer_url_parse()` 声明（纯字符串、宏外编译、全构建 host 可测） |
+| `src/transfer.c` | `transfer_url_parse()` 纯函数（`smb://`、`nfs://`、`//host/share`、裸 `host/share`、`host:/export` 五种形式；空 server/share、尾冒号、绝对路径、NULL 均拒绝；尾路径允许空 = share 根）；`list_push()` 共享 helper（local/smb/nfs 三后端复用）；宏守卫下 smb（`smb2_init_context`→`smb2_connect_share(ctx,server,share,NULL)`→`smb2_opendir/readdir/stat/pread`）+ nfs（**`nfsio_*` 前缀**——`nfs_read`/`nfs_close` 是 libnfs 公开符号名；`nfs_init_context`→`nfs_mount(server, export_name)`，share 无前导 `/` 时补 `"/"`）四函数；`transfer_open` **惰性连接**（只验 URL 形状，连接错误在首次 list/read/size 以 MANGO_ERR_NOTFOUND 浮出，镜像 local fd 惰性开） |
 | `tests/test_transfer.c` | +25：URL 解析段 19（五种形式 + 嵌套相对路径 + 尾斜杠→空 path + 空 URL/server-only/尾冒号/绝对路径/NULL 拒绝）+ `scheme_supported` 契约 6（local/NULL/空→1、smb/nfs 本机构建→0、ftp→0）；宏关分支 `transfer_open("smb:")/("nfs:") == NULL` 两断言保留钉死 |
 
 **测试（本机验证链，全绿）**：host 矩阵全绿（transfer 新增 25 断言：URL 解析 19 + `scheme_supported` 契约 6，local 后端行为零变化）→ MinGW 宏开 `-fsyntax-only` SYNTAX-OK → WSL Linux POSIX 分支 POSIX-SYNTAX-OK → libsmb2 全 **53 TU** 编译 `ALL-LIBSMB2-OK`（Linux 是忠实代理）→ libnfs 全 **25 TU** 编译 `ALL-LIBNFS-OK`（Linux 模拟 config）→ **链接冒烟**：78 TU + 宏开 transfer.c + 驱动 main 在 WSL Linux **真实链接成单个 ELF 并运行**，宏开分支行为断言（scheme_supported/URL 解析字段/惰性 open/local 回归）全过——把 SDK 机的链接验证在宿主侧提前做了。冒烟抓到的三处修复见下。
@@ -333,7 +334,7 @@ Session 9 已接顶栏/任务/解压提交；本档把**文件视图**与**解�
 **链接冒烟新坑（本 Session 追加）**
 - **libnfs `major()`/`minor()`（nfs3/nfs4 mknod 路径）**：libnfs 在 `#ifdef HAVE_SYS_SYSMACROS_H` 下才 include `<sys/sysmacros.h>`。我们的 config **undef 它是正确的**（FreeBSD 的 `<sys/types.h>` 自带 major/minor，且 FreeBSD 没有 sys/sysmacros.h——定义了反而编译炸）；glibc 2.28+ 把 major/minor 挪进 `<sys/sysmacros.h>`，Linux 模拟编译须在临时 config 里**追加** `#define HAVE_SYS_SYSMACROS_H 1`（与 strip SOCKADDR_LEN 同类：改临时 config 而非 shipped config）。
 - **`transfer_scheme_supported` 契约修复**：`parse_scheme` 把未知 scheme 折叠成 local（`transfer_open` 的「未知前缀=本地路径」契约需要），导致 `scheme_supported("ftp")==1` 违反「已知且已编入才 1」的注释契约。新增 `scheme_is_known()` 前置判别，未知 scheme 恒 0。host 测试 +6 断言（local/NULL/空→1；smb/nfs 本机构建→0；ftp→0）。
-- **`export_name` 截断边角**：nfs 连接缓冲 256 字节对 255 字符 share 的 `"/%s"` 需 257 字节，扩到 `NEXUS_PATH_MAX`（顺带消掉 `-Wformat-truncation`）。
+- **`export_name` 截断边角**：nfs 连接缓冲 256 字节对 255 字符 share 的 `"/%s"` 需 257 字节，扩到 `MANGO_PATH_MAX`（顺带消掉 `-Wformat-truncation`）。
 
 **本档关键坑（新踩）**
 - **config.h 陷阱**：libsmb2/libnfs 均 `#ifdef HAVE_CONFIG_H → #include "config.h"` ⇒ 须 `-DHAVE_CONFIG_H` + 手写 config.h（面向 FreeBSD sysroot 口径）；宏必须 per-target 限定，全局加会让 zlib/minizip/7z 在共享 -I 链上意外捡到 NAS 的 config.h。
@@ -356,7 +357,7 @@ Session 9 已接顶栏/任务/解压提交；本档把**文件视图**与**解�
 **SMB 拉取验证（SDK 机 / 真 NAS，连通 `make LIBSMB2=1` 产物）：**
 1. 起 SMB 服务器：真 NAS 现成 share，或本机 `smbd`（`[share] guest ok = yes`）；**先确认 `ss -ltn | grep :445` 空闲**（FreeBSD 无 Windows 端口冲突）。
 2. 放一个测试文件（如 `games/hello.pkg`），记其 `sha1sum`。
-3. 启动 nexus 产物 + HTTP，用产品路径验证（api.c 直调 `transfer_open(scheme,path)`）：
+3. 启动 mango 产物 + HTTP，用产品路径验证（api.c 直调 `transfer_open(scheme,path)`）：
    - 列目录：`GET /api/fs/list?path=smb://<host>/<share>/games` → 应列出 `hello.pkg`，type 正确。
    - 拉取：`POST /api/fetch {src:smb://<host>/<share>/games/hello.pkg, dst:<本地>, scheme:smb}` → task_id → 轮询 `/api/tasks` → **DONE**。
    - 校验：dst 文件 `sha1sum` == 源 `sha1sum`。
@@ -367,7 +368,7 @@ Session 9 已接顶栏/任务/解压提交；本档把**文件视图**与**解�
 2. URL 用 `nfs://<host>/<export>/<path>`；**export 名无前导 `/`**（如 `nfs://host/export/path` 里 export=`export`），后端 `nfs_mount` 会补 `"/"`。断言 NFSv3 或 v4.1（`HAVE_NFS4_2` 已 undef，仅 4.1）。
 3. 同 SMB 第 3 步走 `/api/fs/list` + `/api/fetch` 校验字节一致。
 
-**连接前断言（宿主已锁，SDK 机应继续绿）**：URL 解析五种形式（`smb://`/`nfs://`/`//host/share`/裸 `host/share`/`host:/export`）、`scheme_supported` 契约（未知 scheme=0、未编入后端=0）、惰性 open（URL 错在 open 报，连接错在 list/read/size 以 `NEXUS_ERR_NOTFOUND` 浮出）。
+**连接前断言（宿主已锁，SDK 机应继续绿）**：URL 解析五种形式（`smb://`/`nfs://`/`//host/share`/裸 `host/share`/`host:/export`）、`scheme_supported` 契约（未知 scheme=0、未编入后端=0）、惰性 open（URL 错在 open 报，连接错在 list/read/size 以 `MANGO_ERR_NOTFOUND` 浮出）。
 
 ---
 
@@ -377,7 +378,7 @@ Session 9 已接顶栏/任务/解压提交；本档把**文件视图**与**解�
 
 删除清单（全部落地，非仅注释）：
 - **后端 C 引擎**：`src/cheatmgr.c/.h`、`src/cheat_sync.c/.h`、`src/cheat_parse.c/.h`、`src/cheat_remote.c/.h`、`src/hijack_stub.c` 整档删除；`api.c` 删除 `/api/cheat/*` 共 7 条路由 + 对应 handler + include。
-- **枚举/调度**：`nexus_common.h` 的 `task_kind_t` 删除 `TASK_KIND_CHEAT_APPLY`；`worker.c` 删 `step_cheat()` 与分派 case。
+- **枚举/调度**：`mango_common.h` 的 `task_kind_t` 删除 `TASK_KIND_CHEAT_APPLY`；`worker.c` 删 `step_cheat()` 与分派 case。
 - **构建/测试**：Makefile `COMMON_SRCS`/`PS5_SRCS` 删除全部 cheat 源；`tests/` 删 `test_cheat_parse.c`/`test_cheat_sync.c`/`test_cheat_remote.c`/`run-cheat-tests.sh`（判据：`ALL CHEAT SUITES PASSED` 不再存在）与 `stubs_ps5.c`/`stubs_nops5.c` 的 cheat 桩、`test_api.c` 的 `test_cheat()`；orchestration 脚本删 `CHEAT_OBJS`。
 - **前端**：`assets/index.html` 删导航 `view-cheats`/`view-cheats` section/`scrimCheat` 对话框/`renderCheats` 等全部 JS 与 `KIND_CN` 对应项；`lang-zh.js`/`lang-en.js`/`install.html` 删对应文案。
 
@@ -408,12 +409,12 @@ Session 9 已接顶栏/任务/解压提交；本档把**文件视图**与**解�
 | `Makefile` / `tests/run-orchestration-tests.sh` | `pkg_stream.c` 进 `COMMON_SRCS`；补 `tests/compat`（`<sys/statvfs.h>` 垫片）与 `-lws2_32` 的 **Windows-only** 分支；`app_install_if_needed` 在两种桩里各补一个 |
 
 **证据（不是「应该能编」）**：prospero-clang 18 + `-Werror` 单 TU 编过 7 个模块（含 `pkg_stream.c`）；
-`make all LIBSMB2=1 LIBNFS=1` **链接成功**，产物 `ps5-nexus-v0.1.0.elf` = **1329776 B** /
+`make all LIBSMB2=1 LIBNFS=1` **链接成功**，产物 `ps5-mango-v0.1.0.elf` = **1329776 B** /
 sha256 **`5a0113766c82b3be9290c7a630c514e729ae08a2d975bfbb95dd3a4fdb571335`** / `e_machine = 0x003e`，
 `.dynamic` 依赖含 `libSceAppInstUtil.sprx` + `libkernel_sys.sprx`。
 🪤 **尺寸与上一版完全相同（1329776）** —— 又一次实证「尺寸相同**不能**证明任何事」（对齐填充吸收差值）：
 只能靠 sha256 + `readelf -SW` 段尺寸 + `grep -a` 新字符串判读（`/stream/install/`、`kstuff is not running`、
-`already installed` 等 7 条**全部命中**）。快照留存 `.build/elf-snapshots/ps5-nexus-v0.1.0-stream-sha5a011376.elf`。
+`already installed` 等 7 条**全部命中**）。快照留存 `.build/elf-snapshots/ps5-mango-v0.1.0-stream-sha5a011376.elf`。
 **符号可得性已核实**：`$SDK/target/lib/libSceAppInstUtil.so`（108 个桩符号）**确实导出** `Initialize` /
 `Terminate` / `InstallByPackage` / `GetInstallStatus` ⇒ 直连 `-lSceAppInstUtil` 即可，**不需要**
 `kernel_dynlib_resolve` 取址（参考实现用后者是因为它要带 helper 进程）。
@@ -444,7 +445,7 @@ sha256 **`5a0113766c82b3be9290c7a630c514e729ae08a2d975bfbb95dd3a4fdb571335`** / 
 | --- | --- |
 | 编排套件 `tests/run-orchestration-tests.sh` | **全绿**。新增 `tests/test_task_delete.c` **43 项**（含两条载荷断言：300 条的树**一次 tick 删不完**、进度严格落在 0 与 total 之间 —— 这正是「有进度条」的全部意义） |
 | 实时验收 `.build/ui_live_check.mjs` | **153 项全过**（原 111 + 本轮新增 42：上传菜单 12 / File 句柄回归 4 / 删除全链路 11 / 关闭进程 6 / 其余） |
-| ELF | `ps5-nexus-v0.1.0.elf` = **1346160 B** / sha256 **`b78226e8c9db2957777fe6e7053b6aec3349b62978c06393cfb11130c4009fea`** / `e_machine 0x003e`，`-Werror` 零告警。内嵌资源 7/7 命中（`关闭进程` / `--ui:1.15` / `jobBarCancel` …），C 侧 7/7 命中（`/api/shutdown` / `删除任务无法续跑` / `IPC$` …） |
+| ELF | `ps5-mango-v0.1.0.elf` = **1346160 B** / sha256 **`b78226e8c9db2957777fe6e7053b6aec3349b62978c06393cfb11130c4009fea`** / `e_machine 0x003e`，`-Werror` 零告警。内嵌资源 7/7 命中（`关闭进程` / `--ui:1.15` / `jobBarCancel` …），C 侧 7/7 命中（`/api/shutdown` / `删除任务无法续跑` / `IPC$` …） |
 | 几何 | `.build/measure-scale.mjs`：9 个宽度档零横向溢出；900px 起顶栏单行 70px；控件 44/51/46px，字号 18/17/16px |
 
 **本轮新增的三个坑（已同步进 §4）**：
@@ -474,7 +475,7 @@ sha256 **`5a0113766c82b3be9290c7a630c514e729ae08a2d975bfbb95dd3a4fdb571335`** / 
 
 ---
 
-## 1s. 当前进度（Session 22，2026-09-30）：文件权限 —— 「Nexus 创建的一切都是 0777」
+## 1s. 当前进度（Session 22，2026-09-30）：文件权限 —— 「Mango 创建的一切都是 0777」
 
 **起因**：真机反馈「上传完的游戏文件权限应该都是 0777，你现在上传完是 0666」。
 
@@ -536,7 +537,7 @@ sha256 **`5a0113766c82b3be9290c7a630c514e729ae08a2d975bfbb95dd3a4fdb571335`** / 
 
 **起因**：真机反馈「插件一运行就结束进程了」。三轮追问把它收敛成三个决定性事实：
 ① 「**网页能开，进去/点一下就没**」（HTTP 服务起来了、静态前端也加载了 ⇒ 不是初始化崩）；
-② 「**旧 payload 能跑，只有 Nexus 新版不行**」（主机/破解状态健康 ⇒ 是本仓当前构建的回归）；
+② 「**旧 payload 能跑，只有 Mango 新版不行**」（主机/破解状态健康 ⇒ 是本仓当前构建的回归）；
 ③ 「**浏览器漏洞注入**」启动。
 
 **根因（`src/httpd.c`，一次指针错认）**：`upload_conn_done()` 是本进程注册的**唯一** MHD 完成回调
@@ -562,9 +563,9 @@ sha256 **`5a0113766c82b3be9290c7a630c514e729ae08a2d975bfbb95dd3a4fdb571335`** / 
 - **宿主矩阵永远看不到**：`src/httpd.c` 需要 `<microhttpd.h>`，**从不进任何宿主套件**
   （`tests/run-orchestration-tests.sh` 的模块表里没有它）—— 所以它在之前每一轮验证里都是隐形的。
 
-**修法**：两个结构体**第 0 个字**各放一个 magic tag（`NEXUS_CTX_JSON` / `NEXUS_CTX_UPLOAD`），各配
+**修法**：两个结构体**第 0 个字**各放一个 magic tag（`MANGO_CTX_JSON` / `MANGO_CTX_UPLOAD`），各配
 `_Static_assert(offsetof(..., magic) == 0, ...)`（编译期钉死「回调只读第 0 字」这个前提）；完成回调改为
-**按 tag `switch` 分派**：`NEXUS_CTX_JSON` 释放 `body`+`cs`，`NEXUS_CTX_UPLOAD` 收尾 `us`+`uc`。
+**按 tag `switch` 分派**：`MANGO_CTX_JSON` 释放 `body`+`cs`，`MANGO_CTX_UPLOAD` 收尾 `us`+`uc`。
 **未知 tag 故意「泄漏不释放」并记一行日志** —— 泄漏一个上下文是可承受的，把一个认不出的指针 free 掉不是。
 
 **新增能力：内置请求日志（真机自证）** —— 浏览器注入的 payload **没有 shell、没有 coredump**，真机崩溃此前
@@ -578,7 +579,7 @@ sha256 **`5a0113766c82b3be9290c7a630c514e729ae08a2d975bfbb95dd3a4fdb571335`** / 
 | `SENT <status> <url>` | 响应已交给 libmicrohttpd |
 
 ⇒ **最后一条没有 `SENT` 的 `REQ` 就是杀死进程的那个请求**。日志路径
-`preferred → /data/nexus-diag.log → 工作目录`（`diag_init()` 在建 HTTP 服务**之前**调用），>512 KB 轮转一次到
+`preferred → /data/mango-diag.log → 工作目录`（`diag_init()` 在建 HTTP 服务**之前**调用），>512 KB 轮转一次到
 `<path>.1`，**逐行 open/append/close**（缓存的 `FILE*` 会正好丢掉最关键那一行）。
 
 **证据**：
@@ -628,14 +629,14 @@ sha256 **`5a0113766c82b3be9290c7a630c514e729ae08a2d975bfbb95dd3a4fdb571335`** / 
    旧仓自己实现了 7zAES（含 `-mhe=on`）/ ZipCrypto / WinZipAES（≈9 700 行：`sevenz_*`、`zipx_*`、
    `zip_extract.c`、`rar_extract.c`）。全搬 = 把 v1.9.3M 倒退。
 3. **「改 UI 就完事」不成立**：上游 API 是 `/api/upload/prepare` + 每文件一次 `/api/upload-file` +
-   `/api/upload/finish`、**单任务串行**；nexus 是单次流式上传 + 统一任务队列 —— UI 与后端被 API 形状
+   `/api/upload/finish`、**单任务串行**；mango 是单次流式上传 + 统一任务队列 —— UI 与后端被 API 形状
    焊在一起。且 PLAN §0 白纸黑字写着「**明确不做：又一个通用文件管理器**」，而上游**就是**那个通用
    文件管理器。
 
 ### 落地：`src/fs_guard.{h,c}`（新增，P0）
 从旧仓 `src/fs_util.c`（371 行）搬两样回来，丢失情况的对照：
 
-| 旧仓 | nexus 之前 | 现在 |
+| 旧仓 | mango 之前 | 现在 |
 |---|---|---|
 | `check_target_space()`（`filemgr.c:1709` 复制/移动、`upload.c:156,393` 上传） | **无**（`statvfs/f_bavail` 只在解压引擎内部） | `fs_guard_space()` |
 | `probe_dir_writable()` / `check_target_writable()`（`fs_util.c:236 / 326`） | **无** | `fs_guard_writable()` / `fs_guard_removable()` |
@@ -681,13 +682,13 @@ sha256 **`5a0113766c82b3be9290c7a630c514e729ae08a2d975bfbb95dd3a4fdb571335`** / 
 | 宿主编排套件（MinGW） | 全绿；`fs_guard` 39 项、`api` 186 项、其余不变 |
 | ASan/UBSan 全套 | **0 报告**；fs_guard 在原生 cwd 再跑 **42 项 0 失败**（负向断言真的执行了） |
 | PS5 ELF | `-Werror` 零告警；sha256 **`52ed1b0098253fa2b644d5f7d01d5dea79a4d3e44c0df0afcacf5761600e631e`**、**1 362 544 B**、`e_machine 0x003e`；比全部源文件新 |
-| 二进制内证 | 全部中文报错 + `.nexus-probe-` 字节级命中（`fs_guard_result_name()` 只被测试引用 ⇒ 被 `--gc-sections` 回收，属预期） |
+| 二进制内证 | 全部中文报错 + `.mango-probe-` 字节级命中（`fs_guard_result_name()` 只被测试引用 ⇒ 被 `--gc-sections` 回收，属预期） |
 
 ### 尚未做（「反向搬运」清单的 P1/P2）
 - ~~**P1** `fs_type_has_unix_modes()`（按 `f_fstypename` 判 FAT/exFAT）+ `fchmod_0777(fd)`~~
   ✅ **已完成（Session 25，见 §1v）**
 - ~~**P1** `mime.c` / `text.c` 的编辑与预览细节（图标/扩展名映射、编辑器行为）~~ ✅ **已完成（Session 26，见 §1w）**
-- ~~**P2** `filemgr.c` 的冲突/合并语义（`make_unique_target()` 的「副本」命名已是 nexus 自有实现，值得对齐）~~ ✅ **已完成（Session 26，见 §1w）：nexus 根本没有 `filemgr.c` 那套副本命名语义，P2 实际落地为「文本编辑的乐观锁冲突」——`/api/text/save` 的 CAS + 前端「强制覆盖 / 重新加载」二选一。**
+- ~~**P2** `filemgr.c` 的冲突/合并语义（`make_unique_target()` 的「副本」命名已是 mango 自有实现，值得对齐）~~ ✅ **已完成（Session 26，见 §1w）：mango 根本没有 `filemgr.c` 那套副本命名语义，P2 实际落地为「文本编辑的乐观锁冲突」——`/api/text/save` 的 CAS + 前端「强制覆盖 / 重新加载」二选一。**
 
 ---
 
@@ -754,16 +755,16 @@ mode 位」并跳过；而 /tmp 明明实施 mode 位（同一轮 fs_guard 42 �
 
 ### 尚未做（清单里剩下的）
 - ~~**P1** `mime.c` / `text.c` 的编辑与预览细节（图标/扩展名映射、编辑器行为）~~ ✅ **已完成（Session 26，见 §1w）**
-- ~~**P2** `filemgr.c` 的冲突/合并语义（`make_unique_target()` 的「副本」命名已是 nexus 自有实现，值得对齐）~~ ✅ **已完成（Session 26，见 §1w）：nexus 根本没有 `filemgr.c` 那套副本命名语义，P2 实际落地为「文本编辑的乐观锁冲突」——`/api/text/save` 的 CAS + 前端「强制覆盖 / 重新加载」二选一。**
+- ~~**P2** `filemgr.c` 的冲突/合并语义（`make_unique_target()` 的「副本」命名已是 mango 自有实现，值得对齐）~~ ✅ **已完成（Session 26，见 §1w）：mango 根本没有 `filemgr.c` 那套副本命名语义，P2 实际落地为「文本编辑的乐观锁冲突」——`/api/text/save` 的 CAS + 前端「强制覆盖 / 重新加载」二选一。**
 
 ---
 
 ## 1w. 当前进度（Session 26，2026-10-01）：「反向搬运」P1 尾 + P2 —— 文本编辑后端（原子写 / 换行·BOM / 乐观锁）+ 冲突语义
 
 ### 起因
-P0（§1u）是「开跑前拒绝」，P1（§1v）是「创建后权限正确」。本轮补清单里最后两条 —— 也把 nexus **从旧仓 `text.c`/`mime.c` 继承来的、却丢了的三处静默能力**补回来：
+P0（§1u）是「开跑前拒绝」，P1（§1v）是「创建后权限正确」。本轮补清单里最后两条 —— 也把 mango **从旧仓 `text.c`/`mime.c` 继承来的、却丢了的三处静默能力**补回来：
 
-1. **非原子写**：nexus 的保存路径是 `fopen(path, "wb")`，它在写入第一个字节**之前**就截断了原文件。一次保存中途失败（U 盘写满、进程退出）会留下「半个文件」盖在原文件上 —— 这是文本编辑器**唯一会销毁用户已有数据**的失败模式。旧仓是 temp + `fchmod` + `fsync` + `rename`。
+1. **非原子写**：mango 的保存路径是 `fopen(path, "wb")`，它在写入第一个字节**之前**就截断了原文件。一次保存中途失败（U 盘写满、进程退出）会留下「半个文件」盖在原文件上 —— 这是文本编辑器**唯一会销毁用户已有数据**的失败模式。旧仓是 temp + `fchmod` + `fsync` + `rename`。
 2. **换行 / BOM 丢失**：浏览器 `<textarea>` 只报 LF，无论原文件是什么。把值原样写回，会把每个 CRLF 文件整篇改写成 LF —— 编辑器里看不出来，其他工具看全是「整个文件变了」。旧仓记住原约定再套用。
 3. **无并发版本检测**：旧仓读时下发 `X-Text-Version`，保存时客户端必须原样回传，否则拒绝；两个标签页（或 PS5 浏览器 + SMB 挂载）不会静默互覆盖。
 
@@ -774,7 +775,7 @@ P0（§1u）是「开跑前拒绝」，P1（§1v）是「创建后权限正确�
 - `tx_mime_for_name()`（大小写不敏感 ext→mime）、`tx_name_is_editable()`（比 mime 窄，图片能预览但不能进 textarea）。
 - `tx_utf8_valid()`（拒 overlong / 孤立代理 / >U+10FFFF，像旧 `valid_utf8()` 一样）、`tx_version()`（FNV-1a 64，文件变更检测器，**不是**安全哈希）。
 - `tx_detect_newline()`（多数决，平局默认 CRLF→保持原样）、`tx_format_for_save()`（按原文件换行 + 仅当原文件有 BOM 才带 BOM；CRLF 重写可能翻倍超 `TX_MAX_BYTES` 上限）。
-- `tx_read()`（`lstat` 拒绝符号链接 / 非普通文件 / 超 `TX_MAX_BYTES`；返回文件 mode 供保存保留）、`tx_write_atomic()`（同目录建 `<path>.nexus-<pid>-<n>.tmp` → `nx_fchmod()` 设回**原文件 mode**（不是 `NX_CREATE_MODE`，编辑不该把配置文件变可执行）→ `fsync` → 才 `rename`；任何一步失败删 temp、原文件不动）。
+- `tx_read()`（`lstat` 拒绝符号链接 / 非普通文件 / 超 `TX_MAX_BYTES`；返回文件 mode 供保存保留）、`tx_write_atomic()`（同目录建 `<path>.mango-<pid>-<n>.tmp` → `nx_fchmod()` 设回**原文件 mode**（不是 `NX_CREATE_MODE`，编辑不该把配置文件变可执行）→ `fsync` → 才 `rename`；任何一步失败删 temp、原文件不动）。
 
 ### 接入点
 - `src/api.c`：`/api/fs/read` 文本回传 `version` + `editable`；删除旧的 `ext_is`/`fs_read_mime` 内联，改用 `tx_mime_for_name`（大小写不敏感）。
@@ -783,7 +784,7 @@ P0（§1u）是「开跑前拒绝」，P1（§1v）是「创建后权限正确�
 - 前端 `assets/index.html`：`openTextEditor` 捕获 `fs/read` 回传的 `version`，`tSave` 原样回传；冲突时如实提示，**确定 = 以我的版本强制覆盖（重新读最新 version 再原子覆盖）/ 取消 = 放弃本地修改并重新加载**。`confirm()` 语义：`true`→覆盖、`false`→重载（写代码时曾写反成 `!confirm`，已修）。
 
 ### 测试
-- `tests/test_text_file.c`（**MinGW 84 / 原生 POSIX 88**）：负载型断言 = 失败保存后原文件逐字节不变且无 `.nexus-*.tmp` 残留（`test_write_atomic_failure` / `test_no_debris`）、CRLF 文件在 LF-only textarea 下仍回写 CRLF 且 BOM 不丢不造（`test_format_keeps_conventions`）、读下发 version == 保存端重算 version（`test_version`）、mode 保留仅在真实施加 mode 的文件系统上断言（`test_mode_preserved`，`/mnt/c` 跳过）。
+- `tests/test_text_file.c`（**MinGW 84 / 原生 POSIX 88**）：负载型断言 = 失败保存后原文件逐字节不变且无 `.mango-*.tmp` 残留（`test_write_atomic_failure` / `test_no_debris`）、CRLF 文件在 LF-only textarea 下仍回写 CRLF 且 BOM 不丢不造（`test_format_keeps_conventions`）、读下发 version == 保存端重算 version（`test_version`）、mode 保留仅在真实施加 mode 的文件系统上断言（`test_mode_preserved`，`/mnt/c` 跳过）。
 - `tests/test_api.c` 186 → **207**：新增 `/api/fs/read` · `/api/text/save` · `/api/text/create` 覆盖（含版本冲突拒绝、原子性）。
 - `.build/ui_live_check.mjs` 153 → **164**：文本编辑组（读取载入、保存回传 version、乐观锁冲突被拒、强制覆盖写回）。
 
@@ -805,10 +806,561 @@ P0（§1u）· P1 fd-chmod/fs 类型（§1v）· **P1 文本编辑后端 + P2 �
 
 ---
 
+## 1x. 当前进度（Session 17，2026-10-07）：目录统一 `/data/Mango` + 日志集中 + PKG 装完自动删
+
+**用户诉求**：删了 `/data/wfm` 后 PKG 卡片信息消失 —— 疑问「PKG 信息不能直接读原包吗、为什么多生成临时文件夹」。逐条回应：
+
+1. **PKG 卡片信息本来就是直接读原文件**（`pkg_info.c` 按偏移读 PKG 头 content_id/title/version/icon，无解压、无临时目录依赖）。卡片消失的真相：用户删的 `/data/wfm` 里存着**从电脑上传的 PKG 文件本体**（前端 `upDir`/`PKG_STAGING` 的默认落点 `/data/wfm/incoming`），删目录 = 删文件 = 卡片消失。不是「临时文件夹承载卡片信息」。
+2. **临时产物统一到一个文件夹**（用户拍板：项目叫 MANGO，去 wfm 字样）→ 全部收敛到 **`/data/Mango/`**：
+   - `incoming`：PKG/上传暂存（原 `/data/wfm/incoming`）
+   - `tmp`：存档临时镜像（原 `/data/save_files`）
+   - `backups`：存档备份（原 `/data/backups`）
+   - `logs`：三份日志（原散在 /data 根目录）
+3. **PKG 装完自动删暂存**（契约反转，用户拍板「装完自动删（失败保留）」）：`ppCleanupWhenDone` 轮询 `/api/install/poll`，真装完（state done 且非 already-installed 跳过）→ `apiJson("/api/delete", {paths:[path]})` 删**本次上传的那一个 PKG**；跳过/失败/取消 → 保留 + toast 说明。2026-10-03 曾因真机反馈「传的包自己消失了」改为保留，现按用户新决定改回自动删。
+4. **日志移入 `/data/Mango/logs/`**：`mango-crash.log`（main.c，宿主构建保持 `./mango-crash.log` 不变）、`mango-install.log`（pkg_installer.c + filemgr.c）、`mango-save.log`（mango_port.c）。main() 启动时 `mkdir /data/Mango` + `/data/Mango/logs`（`__SCE__` 块内）。
+5. **内部临时文件前缀 `.wfm-` → `.nex-`**（用户拍板「全部改成 _nex」，保留点号隐藏语义）：`.nex-extract-`（extract_engine/rar/sevenz/zip）、`.nex-part-`（zip 分卷）、`.nex-copy-`（filemgr）、`.nex-port-`（mango_port 端口复制）、`.nex-pre-restore`（存档恢复前安全副本）、`.nex-upload-*.tmp`（upload）、`.nex-<pid>-<nsec>.tmp`（text 编辑器）。不改：`wfm_serve_pkg_py` 汇编标签（改则链接失败）、`mz_crypt_wfm.c`（vendored 第三方）、`wfm-7zip-helper`（上游项目名）。
+
+**改动文件**：`src/savemgr.c`（路径迁移 + `_wfm_`→`_nex_` + `recursive_mkdir`）、`src/main.c`（建目录 + crash 日志路径）、`src/pkg_installer.c`/`src/filemgr.c`（install 日志路径 + 错误串）、`src/mango_port.c`（save 日志 + `.nex-` 前缀）、`src/extract_engine.c`/`rar_extract.c`/`sevenz_extract.c`/`zip_extract.c`/`text.c`/`upload.c`（前缀）、`assets/index.html`（incoming/tmp/backups 路径 + `ppCleanupWhenDone` 重写）、`hosttest.py`、`.build/dock_pkg_checks.mjs`（契约反转断言）、`.build/check-elf-gzip.py`（`PKG_STAGING = "/data/Mango/incoming"`）、`.build/preview/index.html`（快照重建）、`README.md`/`REAL-CONSOLE-CHECKLIST.md`/`docs/sdk-machine-checklist.md`（路径同步）。
+
+**验收**（`WFM_CLEAN=1` 全量重建）：make linux RC=0、make all RC=0、check-elf-gzip 0 失败（含新 PKG_STAGING 断言）、hosttest **201/0**、dock_pkg_checks 全绿（真装完删单文件断言 `paths[0] === "/data/Mango/incoming/x.pkg"` + toast 已清理）。产物 `PS5-Mango-v1.0.3.elf`（**未提交**）。
+
+**真机必测**：① 新目录布局 `/data/Mango/{incoming,tmp,backups,logs}` 由 main 自动建；② PKG 上传安装 → 装完 `incoming` 里该 PKG 消失；③ 已安装跳过 → PKG 保留 + 跳过 toast；④ 旧 `/data` 下遗留的 `wfm`/`save_files`/`backups` 目录与根目录日志需手动清理（新代码不再写）；⑤ 三份日志出现于 `/data/Mango/logs/`。
+
+**追加（同 Session 17）：上传同名冲突选择**（用户反馈「同名直接报上传失败」）。根因：前端普通上传从不发 `X-WFM-Overwrite` 头，后端 [upload.c](src/upload.c) 检测目标已存在且无 overwrite=1 → EEXIST → 409。修复：`uploadOne` 预检 `FS_ENTRIES` 同名 → 弹 `#scrimUpC` 三选（覆盖 `X-WFM-Overwrite:1` / 重命名 `nextUpName` 生成 `name (1).ext` / 跳过）；xhr 409 兜底同样弹窗。**⚠️ 重命名不能改 `file.name`（File.name 只读 getter，赋值静默失效）**——改名走 `startUploadOne(file,done,overwrite,dst,eff)` 显式 `eff` 名参数，覆盖/重命名/跳过/成功 toast/onerror 任务匹配全部用它。失败计数只在「跳过」时记（覆盖/重命名重试成功是一次成功，提前 ++ 会同时出现成功+失败）。验收：`node .build/chk_upload.mjs`（拦截 `/api/upload-file` 实测 11 断言：无冲突直传/弹窗/覆盖头/重命名新名/跳过计数/409 兜底重试）全绿；preview_check 121 通过、E1 无 JS 错误（P11/Q5-Q8 为 Session 16 存档页重做遗留的过时断言，非本轮引入）。
+
+---
+
+## 1y. 当前进度（Session 27，2026-10-11）：长导入「看起来像假死」—— 其实是弹窗从来是空的 + 进程卡在内核里自启成死循环
+
+**用户报障原文**：「上传替换加密的存档时，会提示『正在解包并逐个读取存档信息…（整包越大越慢，请勿关页）』，然后刷新网页后插件的所有功能都不能用了，进程还在，但是已经假死了。……最好给个进度显示……如果无法计算结束时间，那能不能显示个日志小窗口告诉用户都干了什么，好让用户知道不是假死了」。
+
+追问后的关键澄清（它把问题从「UI 可见性」提升到**进程级根因**）：
+
+> 「应该不是假死了，**就是进程崩了，然后进程又自动启动了**，但是功能都不能用了。我现在**手动结束进程他还会自启**而且插件功能也不能用。」
+
+### 根因（四条，逐条都对得上用户描述）
+
+| # | 现象 | 真因 |
+| --- | --- | --- |
+| 1 | 日志弹窗**开着却永远空白**，用户只能看到「请勿关页」 | `api_save_mgr_import_log` 里 `json_escape()` **自带两侧引号**，外面又手工加了一层 ⇒ 整个响应是**非法 JSON**（`{"text":""""}`）⇒ 前端 `r.json()` reject、被 `.catch(()=>null)` 吞掉 ⇒ 每轮轮询都安静地什么都不画。**这个弹窗从上线起就没显示过任何内容** —— 用户抱怨的「不知道在干什么」就是它 |
+| 2 | 整包几百 MB 却要 `malloc(zsize)` 整包进内存 | `import_archive` / `import_zip` / `encrypt_upload` 三条路径都先把整包读进堆；payload 内存本就紧张 ⇒ 大包直接 OOM/崩溃 |
+| 3 | 崩溃后**自启、然后功能全废** | `main.c` 里 `kill(pid, SIGKILL)` **失败即 `return 1`**。老进程卡在 `sceFsMountSaveData` 的**内核不可中断睡眠**（`D` 状态，连 `SIGKILL` 都带不走），所以 kill 必然失败 ⇒ 进程秒退 ⇒ 插件管理器判定「需要再注入」⇒ **无限自启**；而老进程还占着 2026 端口与 `/data/mount_sd` 挂载点 ⇒ 新进程的每个存档操作都失败 |
+| 4 | 自启后「功能都不能用」，且结束不掉 | 崩溃时 `/data/Mango/tmp` 里留下 `_nex_arc`（几百 MB）、`_nex_zip_*.tmp`、`_nex_up_*`、`_nex_new_*`、`_nex_enc_*`，把 `/data` 写满；外加 `/data/mount_sd` 残留挂载。启动路径**从不清理**，于是每个新进程都在一个脏且满的盘上开工 |
+
+### 修复
+
+- **结构化进度**（`src/savemgr.c`）：`{phase,done,total,text}` + 逐行日志。phase `1 解包 / 2 逐个读取 / 3 替换落盘`。新增 `savemgr_import_progress()` / `savemgr_import_progress_end()`；**dispatch 单点收口**（8 条长路由），保证任何提前 `return` 都会把 phase 归零 —— 否则页面永远停在「进行中」，正是历次「进度卡死」反馈的来源。
+- **修掉非法 JSON**：`json_escape()` 自带引号，调用点不再手工加。**这就是弹窗一直空白的直接原因。**
+- **消除整包入内存**：新增唯一解包入口 `savemgr_extract_zip_path(dest, zip_path)`，直接吃盘上路径；`import_archive` / `import_zip` / `encrypt_upload` / `import_encrypted` 四条路径全部改为按路径解包，`malloc(zsize)` 全部删除。`savemgr_extract_zip()` 退化成「落一份临时文件后转调」。
+- **zipx 进度桥**：`sm_zip_on_progress()` 把 `zipx_progress_t` 的字节口径接进进度（按「阶段变化或 pct 跨 10」压频，避免刷爆日志）。
+- **挂载看护线程（根因防护）**：`sceFsMountSaveData` / `sceFsUmountSaveData` 一律不许裸调 —— 全部经 `sm_kern_run()`（`SM_MOUNT_TIMEOUT_MS = 60000`，超时**放弃线程**并回去报错，而不是自己也跟着卡死）。设备段原实现改名 `sm_mount_image_inner` / `sm_unmount_inner`，只在看护线程里被调用。返回码：`0` 已回来 / `-1` 超时 / `-2` 上一次还没回来 / `-3` 线程起不来；对外 `-100`（超时）/ `-101`（忙）。
+- **崩溃后自恢复**：新增 `savemgr_boot_reconcile()`，`main()` 启动时调用 —— 清 `_nex_*` 前缀（含 `_nex_arc` 整棵树）、`statvfs` 报空闲 MB（<64 MB 告警）、设备上清残留 `/data/mount_sd`。**同时 `kill()` 失败不再 `return 1`**（改为记台账 + 继续端口探测），无限自启循环由此断开。
+- **前端**：弹窗加状态行 + **确定态**进度条（`smLogApplyProgress()`；`total>0` 才算百分比，算不出就退回滚动条，不编造数字）；`✗`/`✓` 行分级上色；跑完自动收窗（先见「在跑」再见「已结束」才收）；**刷新页面后自动重挂**（`if (LIVE) fetch(...)`，phase≥1 就重开轮询）。三处长导入（整包 ZIP / 单镜像 / 解密标签）全部用 `startSmLogPoll()`/`stopSmLog()` + `try/finally` 夹住；整包分支的文案从「请勿关页」改成「进度见下方弹窗」。
+
+**改动文件**：`src/savemgr.c`（最多）、`src/savemgr.h`、`src/main.c`、`assets/index.html`、`Makefile`（v1.0.8→v1.0.9）、`hosttest.py`、**新增 `.build/chk_import_progress.py`** + 接进 `.build/build-verify-wsl.sh`、`.build/preview_stub.js` / `.build/preview_check.mjs`（W 段 7 条）。
+
+### 验收
+
+- `make linux` RC=0（`-Werror` 零告警）；`make all` RC=0。
+- hosttest **229/0**（新增 4 条：启动清理三条 + `import_log` 契约一条 `phase/done/total/text + lines`）。
+- 静态守卫 `chk_import_progress`：5 组不变量 **0 违规**。
+- 前端真 Chromium **158/158**（新增 W1a/W1b/W1c/W1d/W2/W3/W4）。
+- ASan sweep：无 ASan/UBSan 报告。
+- **反证 A–G 全部转红后恢复绿**（每一道不变量都必须能失败）：
+  A 整包又进内存 · B 挂载绕过看护 · C 长任务不开进度窗 · D 进度不收尾 · E 公开入口直连 `*_inner` · F 日志 JSON 又套一层引号 · **G 桩返回非法 JSON ⇒ W 段 7 条全红，其余 151 条仍绿**（G 的观测量正是用户看到的那片空白：`stat = "准备中…"`、`lines = []`）。
+- 产物 `PS5-Mango-v1.0.9.elf`（`e9e7e7f9…`）/ `PS5-Mango-linux-v1.0.9`（`5d1472ca…`）。**未提交。**
+
+### 🪤 本轮新踩的坑
+
+- **守卫把注释里的旧代码当真代码** ⇒ 注释里写「旧实现 `malloc(zsize)`」直接误报。修法：`strip_comments()`（保留行号）。
+- **守卫把函数原型当调用**（`int sceFsMountSaveData(...);`）⇒ 先正则收集 `;` 结尾的声明区间再跳过；还要把 `#else /* __linux__ host stubs */` 之后的宿主 stub 排除。
+- **反证脚本里常量少了一个反斜杠 ⇒ 假绿**：`'strbuf_append(&b, "\\"");'` 生成出来是两个反斜杠，反证「通过」了但根本没注入成功。修法：用 `chr(92)` 显式拼装，并**在反证脚本里 `assert` 载荷真的非法**（`json.loads` 必须抛）—— 数转义层数是不可靠的。
+- **等不到元素时不要 `waitForFunction` 裸抛**：抛出去会被最外层 `catch` 收走，后面 5 条断言连跑都跑不到（一条失败掩盖五条）。包 `try/catch` 让**这条自己 FAIL**。
+
+---
+
+## 1z. 当前进度（Session 28，2026-10-11）：三处界面细节 —— 顶栏去重、存档页按钮收尺、选择文件按钮显形
+
+用户原话：「前端最上面的 "HTTP 服务 :2026" 只写 "HTTP 服务" 端口就不用显示了，因为前面有 IP 加端口的显示。
+优化一下存档管理页面下的所有按钮大小现在看着有些大不协调，选择文件的按钮配色跟背景重合了看不清」
+
+三处都在 `assets/index.html` 单文件里（CSS + 两行文案），**后端零改动**。但数值对不等于好看 —— 三条断言能钉住
+口径，钉不住「顺不顺眼」，所以真机必测清单里也各留了眼睛验收项（见 §6 第 16 条）。
+
+1. **顶栏状态胶囊不再复述端口** —— `chipHttp` 从 `HTTP 服务 :2026` 收成 `HTTP 服务`。端口已经在左边
+   `ipChip`（`192.168.1.42:2026`）里了，同一行说两遍是噪音。
+   ⚠️ **HTML 播种值和 `applyStatus()` 里 `led()` 的文案两处都要改** —— 桩会回 `http:true`，JS 那句才是真正
+   生效的那句；只改 HTML 的话页面一加载就被 JS 覆盖回带端口的版本。X1 断言钉的就是这个（`html-chip` 反证相
+   特意把**两处都**还原成旧样子）。
+2. **存档页按钮统一 38px** —— 改前同一屏里并存四种高度：`.btn` = 40×`--ui` ≈ 49px、`.btn.sm` = 38×`--ui` ≈ 46px、
+   `.seg` 外框 = 50px、`.search` = 38px（硬编码、不乘 `--ui`）。表单区里 8~11px 的落差读起来就是「没对齐」。
+   现在 `#view-saves .btn` 一律 38px，与同排 `.search` 齐平，主操作按钮也不再比旁边的选择按钮高出一头。
+   - ⚠️ **只作用于 `#view-saves`**：文件页 / 游戏页的按钮尺度是另一套已验收的账（G21 / G22 在钉），别顺手一起改。
+   - ⚠️ **视觉收小、命中区不许跟着缩**：`::after` 撑回 44px（与 `.btn.xs` / `.ipchip::after` 同一招）。
+     X2a 断言专钉这一条 —— 只钉「高度是 38」的断言是半个断言。
+   - ⚠️ 写死 38 而不是 `calc(38px*var(--ui))`：`.search` / `.seg` 本来就硬编码，本页表单区历来不跟 `--ui` 走。
+3. **「选择文件」按钮显形** —— 改前它跟所有 `.btn` 一样只有 `--ghost-line`(#333) 的 1px 描边、零填充，
+   叠在 `--page`(#0a0a0a) 上对比度不足 2:1，真机上读成「一块空白」。现在给它**和同排 `.search` 输入框完全同款**
+   的一档：实底 `--s1` + 亮边 `--line-2`（实测 `rgb(25,25,25)` / `rgb(59,59,59)`），hover 抬到 `--s5`。
+   选 `--s1` 而不是更亮：它右边紧挨着「未选择文件」的灰字、下面就是同款输入框，三者必须读成「同一套表单控件」。
+   - 顺手把 6 个 `<label class="btn sm" style="height:38px">` 的**内联高度删掉** —— 内联样式压得过 CSS 选择器，
+     留着它这一页的尺寸就永远不归 CSS 管（将来调尺寸会调不动，且这种「改了没反应」最难查）。
+
+**验证**：前端真 Chromium **162/162**（新增 X1 / X2 / X2a / X3）；hosttest **229 / 0**；四道静态守卫 0 违规；ASan 无报告。
+**反证**：`.build/cf-2026-1011-ui.sh` 四相（`html-chip` / `btn-size` / `btn-hit` / `pick-bg`）把旧样子逐条塞回去，
+各自**只**打红它对应的那一条，还原后 `assets/index.html` 的 sha256 与动手前逐字一致。
+
+⚠️ 一条值得记的方法论：`btn-size` 相一开始的写法是「把 38 改成 46」，结果**所有**按钮齐刷刷变成 46px 单独一档
+（`uniq=[46]`）—— 红是红了，但红在「不等于 38」，而不是断言真正要守的「多档混排」。改成让那条规则**整个失效**
+（选择器改名成 `#view-saves .btn--off`）之后，`uniq` 才变回 `[46,49]`，也才真的复现了改前的病。
+**反证的失败原因必须和断言的语义对齐** —— 只要"碰到了"就算数的反证，会在断言口径悄悄漂移时继续给绿灯。
+
+---
+
+## 1aa. 当前进度（Session 29，2026-10-11）：「上传」下拉菜单的文字大小与图标对齐
+
+用户原话：「文件管理页面中的 上传按钮点开后那个下拉列表上的文字大小不对 与前面的图标也没对齐」
+
+一个 `.popmenu` 规则里的**三个原因叠在一起**，全在 `assets/index.html`（后端零改动）。
+先用真 Chromium 量了改前的实际数值，再动代码：
+
+| 项 | 改前实测 | 改后实测 |
+|---|---|---|
+| 条目字号 | **18.3px**（`15px*--ui`） | **17.08px**（`14px*--ui`，= 触发器 `.btn.sm`） |
+| 图标中心 − 文字中心 | **−5.6px**（图标偏高） | **0** |
+| 条目行高 | **63.4px**（`52px*--ui`） | **46.36px**（`38px*--ui`，= 触发器高度） |
+
+1. **字号比自己的触发器还大** —— 菜单文字 18.3px、打开它的按钮 `.btn.sm` 17.08px。菜单不该比触发器更响，
+   降到 `.btn.sm` 同档（工具栏「刷新 / 新建文本 / 新建目录」也是这一档）。
+2. **图标与文字不同心** —— `align-items:flex-start` + `.popmenu button svg{margin-top:2px}`。
+   这套是给「图标 + 标题 + **副标题**」的**两行条目**写的（见同节的 `button i` 规则），
+   而那个带副标题的条目「保留目录结构」已于 2026-10-02 删除（C12b 在钉），菜单里只剩单行条目 ⇒
+   `flex-start` 只剩副作用：文字行盒 `18.3×1.65 = 30.2px`、图标按顶边贴，**两者中心恒差 5.6px**。
+   改成 `center` 并**删掉那个手写的 `margin-top` 补偿** —— 那种补偿会在字号/行高一变时立刻变成新的错位。
+3. **行高同为两行时代的遗留** —— `52px*--ui = 63.4px`，比它挂靠的按钮高 17px。收到 `38px*--ui = 46.36px`，
+   **正好等于 `.btn.sm`**，仍满足 ≥44px 的触控命中区（PS5 是触摸板/手柄光标）。
+
+⚠️ **断言必须先钉「菜单真开着」**（Y0）：菜单是 `display:none`，关闭态下 `getComputedStyle` 照样返回字号，
+而两个 rect 都是 `0×0` ⇒ 中心差恒为 0 —— 没有 Y0 的话，Y2 会是一条**永远不会失败**的断言。
+
+**验证**：前端真 Chromium **166/166**（新增 Y0 / Y1 / Y1a / Y2）；hosttest **229 / 0**；四道静态守卫 0 违规；ASan 无报告；
+制品 `PS5-Mango-v1.0.11.elf`，`strings | grep -oE 'v1\.0\.[0-9]+' | sort -u` 只剩 `v1.0.11`。
+
+**反证**：`.build/cf-2026-1011-upmenu.sh` 三相（`menu-font` / `menu-align` / `menu-row`）把旧样子逐条塞回去，
+**各自只打红它对应的那一条**（改序号是 Y1 / Y2 / Y1a），还原后 `assets/index.html` sha256 逐字一致。
+`menu-align` 相特意把 `align-items` 与 `svg{margin-top}` **两处一起**还原 —— 只改前者是「半旧状态」，
+量出来的偏移（−4.59px）跟真实旧版不是同一个数，那种反证证明不了多少。
+
+---
+
+## 1ab. 当前进度（Session 30，2026-10-11）：PKG 信息窗宽度 + 已安装游戏的「卸载」+ 临时文件自动清理 + 导入弹窗的终态
+
+用户一轮提了**四件事**（原话）：
+
+> 「PKG管理页面中的PKG窗口再加宽些 现在窗口太小PKG的信息显示不全，显示已安装的游戏是不是也能再加个卸载的按钮如果不能加就算了。还有上传了一些临时文件如果不用了可以自动删除掉。再存档页面中上传加密的存档后提示我本机有相同文件问我是否要替换我点是之后，会显示：…然后这个窗口也不知道是不是成功了，进度条还一直在闪，只有一个关闭按钮」
+
+### ① PKG 信息窗「加宽不了」——`max-width` 是一句空话
+
+`#scrimPkgInfo` 的弹窗上写的是 `style="max-width:900px"`，而 `.dlg` 的基础规则是
+`width:min(660px,94vw)` —— **`max-width` 只能收窄、不能放宽**，于是弹窗一直就是 **660px**。
+改前实测（真 Chromium，1920×970）：
+
+| 项 | 改前实测 | 改后实测 |
+|---|---|---|
+| `#scrimPkgInfo .dlg` 宽度 | **660px**（`max-width:900px` 完全不生效） | **1040px**（`style="width:min(1040px,94vw)"`） |
+| 摘掉那条内联声明后 | 660px | 660px（对照组，证明 1040 确实是这条声明给的） |
+| `#pkgInfoPane table` 的 `table-layout` | **`auto`** | `fixed` |
+| 首列（字段名）占表格宽 | 31.7%（内容说了算） | **32.0%**（`<col>` 钉死） |
+
+第二处根因：`renderPkgInfoPane()` 的注释从 2026-10-10 起就写着「两个 tab 都用
+`table-layout:fixed` 的表格渲染」，但 **`.pkginfo-table` 这条 CSS 规则从来没写进样式表**。
+auto 布局下 `<col style="width:32%">` 只是"建议"，值列的 `min-content` 会把列顶开 ⇒
+长 CONTENT_ID / 路径折成一列字。现在整块规则补齐（`fixed` + `word-break:break-all`），
+`Z2` 在钉它。
+
+第三处：`/api/pkg/info` **从来不返回 `title_id` / `title` / `version`**，而前端
+`pkgInfoSpecRows()` / `pkgInfoSub` 正是按这三个字段渲染「TITLE ID」与「内容版本」——
+弹窗的规格页永远缺这两行。`pkg_info.c` 现在补上（字段名与 `/api/pkg/scan` 一致，同源同名）。
+
+### ② 已安装的游戏加「卸载」
+
+可行性先取证再动手：`nm -D /opt/ps5-payload-sdk/target/lib/libSceAppInstUtil.so`
+确认导出了 `sceAppInstUtilAppUnInstall`（以及 `…UnInstall2/ForMultiInstall/Remote/Types`
+和 `…CancelUnInstall`），原型 `int32_t sceAppInstUtilAppUnInstall(const char *titleId)`
+（PS4/PS5 同签名，公开 AppInstUtil.h）。SDK 里没有对应 `.h`，所以按项目惯例**运行时
+dlopen + dlsym**，并且设成**可选符号**（老固件没有它也照样能装包）。
+
+- `src/pkg_installer.c`：`pkg_uninstall_begin()` 走与安装同一把 `g_inst_session_lock`；
+  `rc == 0` 只表示「已被系统安装器受理」，**不是**同步删完 —— 文案照实说，以主机桌面为准。
+- 平台不支持（宿主 / 固件没导出符号）返回 `PKG_INSTALL_UNSUPPORTED`，路由映射成
+  **501 + `pkg_uninstall_unsupported`**，和 `/api/pkg/install-url` 的
+  `pkg_install_unsupported` 同一条口径；前端据此把「这台机器做不了」和「这次失败了」**分开说**。
+- `/api/pkg/uninstall` **只收 `title_id`**（4 大写字母 + 5 位数字），绝不收路径 ——
+  交给内核的东西必须是一个标题号，前端不该有能力让内核删任意路径。
+- 前端：已安装（非 fPKG / 非 PC）的卡片从 `<button disabled>已安装</button>` 换成可点的
+  `卸载`；点了先 `confirm` 讲清「连带删存档、不可撤销、要保留先去存档管理备份」，
+  成功后 `markLibDirty()` + 重扫（服务端只会把「已安装」降级，不重扫按钮还停在「卸载」上）。
+
+### ③ 上传的临时文件用完自动清理 —— 但**不能清早**
+
+新增 `sm_is_staged_src()` / `sm_cleanup_staged_src()`（`src/savemgr.c`），三重自我约束：
+
+1. **只认两个本工具自己的暂存根**：`/data/Mango/incoming/`、`/data/Mango/tmp/`。
+   用户自己放在别处（U 盘、`/data/pkg`、自己的目录）的包一律不碰；
+2. **只删普通文件**，不递归、不删目录；
+3. **只在成功后调用** —— 失败要留着重试与排查。
+
+调用点：单 ZIP 导入（`import_zip_common`）、单镜像 finalize（`import_finish`）、
+加密导出（`encrypt_upload`）、改签导出（`resign_upload`，**不动用户的 key**）。
+
+⚠️ **归档批量导入是个例外，而且第一版写错了**：清理原本挂在**扫描阶段**
+（"摊包之后源 ZIP 就用不到了"）。可那时用户还没点确认 —— 取消之后暂存里那份解压
+结果会被删掉，**重扫的唯一输入就是这个源包**，删早了等于让用户重传几百 MB。
+
+改成在 `import_archive_finish` 里**按结果**决定：`failed == 0 && done > 0` 才清，
+有失败项就保留（日志里明说「源 ZIP 已保留（有失败项，重试要用）」），取消则原样保留。
+这和项目中「PKG 装完自动清理、失败保留」是同一条纪律。
+
+> 🪤 宿主上**永远走"有失败"那条路**（没有 PS5 内核，整批替换每张都 `mount failed`），
+> 所以「全部成功 ⇒ 删源包」这个分支宿主跑不到。它是靠 `.build/chk_import_progress.py`
+> 新增的 **3b 段**记账的（扫描阶段不许清 / finish 必须清 / 必须挂在 `failed == 0` 上），
+> 并配了 3 个反证相。别拿 hosttest 的绿灯当这条分支的证据。
+
+> 🪤 这个改动第一次跑就把 **hosttest 打挂了**：测试收尾 `os.unlink(arc_path)` 撞
+> `FileNotFoundError`，因为源包在扫描阶段就被删了。**测试挂掉是发现设计错误的方式**，
+> 不是"顺手把测试改绿"。现在 hosttest 反过来钉住新契约：扫描后源包在、失败后源包在、
+> 取消后源包在（237 项）。
+
+### ④ 导入弹窗「看不出成功没有 + 进度条一直闪」——三条原因叠在一起
+
+用户贴的那段日志（「解包中：整包 60 MB，正在摊开…」）其实是**上一轮**的：
+
+1. **后端日志缓冲从不清** ⇒ 前端**先开窗再发请求**，新窗第一帧把上一轮整段重放。
+   新增 `savemgr_import_progress_begin()`，由 `dispatch_save_mgr()` 在路由**前**调用、
+   路由后调 `_end()` —— begin → route → end 的**顺序**由静态守卫钉住。
+2. **`finally { stopSmLog(); }` 把结论关掉**：`smArcFinBtn` 的 `try{…}finally{ stopSmLog(); }`
+   在请求一返回就拆窗，`smLogSettle` 刚写好的 ✓/✗ 用户根本来不及看。
+   收尾现在只由 `smLogSettle(ok, msg)` 负责（`finally` 只恢复按钮状态）。
+3. **进度条一直闪**：`smLogApplyProgress` 在 phase 0 时无条件摘掉 `.det` ⇒ 退回
+   `sm-logbar-sweep` 跑马灯。现在 phase 0 **且从未见过运行**时**不动**进度条，
+   状态行如实说「准备中…」而不是「任务已结束」。
+
+配套：`smLogSettle(false, …)` 窗**留着**（失败原因正是用户要读的东西）+ 状态行红 +
+进度条冻在满格；`smLogSettle(true, …)` 写 ✓ 行 + 看 2.2 秒再收窗。`encrypt_upload` /
+`resign_upload` 这两条以前**根本没有进度窗**，一并接进来。
+
+> 🪤 `smLogSettle` 必须是**粘滞**的（`smLogSettled`）：settle 是同步调的，而那一轮
+> 轮询的 fetch 已经在路上，落地时带着「phase 0」回来，会把刚写好的「✗ 失败」盖成
+> 「准备中…」—— 这正是这一轮要修的那件事换个形式复发。反证相 `log-nosticky` 在钉它。
+> 🪤 前端增量渲染的游标必须支持**行数回退**（后端清了缓冲）⇒ 整窗重画，否则新任务的
+> 行永远补不上（`slice(shown)` 恒为空）。反证相 `log-replay` 在钉它。
+
+### 验证
+
+- 前端真 Chromium **175 / 175**（新增 Z1 / Z2 / Z3 / Z4 / Z4b / Z4c / Z5 / Z6 / Z7）；hosttest **237 / 0**；
+  四道静态守卫 0 违规；ASan 无报告；NAS 端到端 SKIPPED（fixture 未起，不算 pass）。
+- 反证：
+  - `.build/cf-2026-1011-pkg.sh` 六相（`pkg-width` / `pkg-table` / `uninstall-btn` /
+    `logbar-freeze` / `log-replay` / `log-nosticky`）—— 各自只打红对应那一条，还原后
+    `assets/index.html` sha256 逐字一致。
+  - `.build/cf-2026-1011-guard.py` 十相 —— 逐条证明**静态守卫新加的每条检查都有牙**
+    （含 `shared-branch-no-settle`：smImgBtn 的两个长 POST 在同一个 handler 里，
+    删掉 ZIP 分支的成功结论必须报在 `import_archive?` 那一行，不能被邻分支的计数补上）。
+  - ⚠️ Z1 的对照组**不能**挑另一个关着的 `.dlg` 来量：`display:none` 的元素两个矩形
+    都是 `0×0`（本项目踩过的坑）。改成在**同一个**弹窗上摘掉内联 `width` 再量（落回
+    660px），顺带自证 1040 就是那条声明给的。
+- 🪤 **反证脚本本身也踩了坑**：`.build/preview_build.py` 每次都 `rmtree` 整个预览目录
+  （11 个文件），六相 = ~72 次删除 ⇒ 第 5 相撞上本机「单回合批量删除」配额（阈值 50），
+  变成 `BUILD FAILED` 的**假失败**。现在预览只重建一次，各相只 `reinject` 覆盖
+  `index.html`（覆盖不算删除）。
+- 🪤 **新加的静态检查第一版是假绿的**：用「POST 前后各 1600 字符」当窗口时，
+  相邻调用点的 `startSmLogPoll` / `smLogSettle` 会落进同一个窗口 ⇒ 本条调用点一对
+  都没有也照样通过。改成按**所属 async 处理函数 + 本分支**（下一个长 POST 为界）定位。
+  这是反证脚本自己抓出来的 —— 所以才要求"打不红的当场改掉，而不是留着充数"。
+
+---
+
+## 1ac. 当前进度（Session 31，2026-10-11）：真机 SIGSEGV —— 坏 `param.sfo` 越界读 + 列表 JSON 栈上越界写
+
+### 报障（v1.0.11 真机）
+
+归档导入 → 解析完成（3 份均已存在）→ 点「覆盖替换」→ **进程崩了又自启，此后网页功能全废**、
+「强制关闭」无效、`http://<IP>:2026/api/shutdown` 也无效。
+
+### 先更正上一轮的误判
+
+§1y / 上一版本节曾判断是"内核挂载卡死在 D state（`g_kern_busy` 永久 1 / 进程退不掉）"。
+**用户取回的 `mango-crash.log` 推翻了它**，决定性一行：
+
+```
+boot reconcile: stale /data/mount_sd umount -> r=0 rc=-2147352544
+```
+
+`r=0` = **看护线程正常返回**，不是卡在内核里。台账里真正的证据是**三次**
+`=== PS5-Mango.elf SIGSEGV ===` ⇒ **用户态崩溃**。
+（"重启 PS5 才能恢复"这条结论不变，但理由要改成"SIGSEGV 后进程状态已破坏"。）
+
+### 台账读出的两条根因
+
+1. 三次崩溃**最后一条请求完全一致**：`273 D POST /api/save_mgr/list`、
+   `100 D POST /api/save_mgr/list`、`29 D POST /api/save_mgr/list`。
+2. 第三次那 29 条请求里**没有任何导入请求**（先 `/` 与图标，再 `fs/list`×7、`pkg/scan`×5、
+   `pkg/icon`×2，最后 `save_mgr/list`）⇒ 触发动作就是**打开存档页**。
+   （"点了覆盖替换"只是把用户带到存档页，崩溃点在列表解析。）
+3. 于是：
+
+- **`savemgr_parse_sfo()` 越界读**（`src/savemgr.c`）：`key_off` / `data_off` / `n_entries`
+  全部**读自 `param.sfo` 文件** —— 即**不可信输入** —— 却直接拿去建指针、定循环边界、算长度。
+  `/api/save_mgr/list` 会扫**整个存档库** ⇒ **任何一个坏 `param.sfo` 都能带走进程**。
+- **`pos += snprintf(...)` 累加下溢**（`api_save_mgr_list` / `api_save_mgr_files`）：
+  `snprintf` 返回的是"假如空间足够、本应写入的长度"，**不是实际写入量** ⇒ 内容一超缓冲，
+  `pos` 就 > `sizeof(out)`，下一个 `sizeof(out) - pos` 在 `size_t` 域**下溢成天文数字**
+  ⇒ `snprintf(buf + pos, 天文数字, ...)` **越界写栈**（`out` 在栈上，约 16 KB）
+  ⇒ 表现为"处理另一个请求时突然 SIGSEGV"。
+
+🪤 **为什么以前一直测不出来**：`api_save_mgr_list` 整段在 `#ifndef __linux__` 里 ⇒
+hosttest（宿主走 `__linux__`）与前端套件**结构上都覆盖不到**；
+`savemgr_parse_sfo` 的宿主调用方要么也在设备分支、要么依赖 `savemgr_mount_image`（宿主恒 `-1`）
+⇒ 畸形 SFO 的行为**从未被测过**。"**只用真机编译的代码 = 永远没测过的代码**" 又一次应验。
+
+### 修复（三处）
+
+- **`savemgr_parse_sfo()` 全面边界化**：`key_off`/`data_off` 夹进 `[0, fsize)`；
+  `n_entries` 夹到 `(fsize - 20) / 16`；每条记录的偏移夹进剩余空间；
+  `param_len` 先夹到 `davail` 再夹到 `(uint32_t)INT_MAX`（防 `(int)` 变负）。
+  终止判据用 **`strnlen(key, kavail) == kavail ⇒ continue`**（缺 NUL 就丢这条记录），
+  比 `re [0-9a-f]{5}` 式的形态检查难绕过。新增 `#include <limits.h>`。
+- **`sm_json_append(out, cap, &pos, fmt, ...)`**：累加器改记**实际写入量**，满了只丢弃不越界；
+  `api_save_mgr_list` / `api_save_mgr_files` 的 8 处 `pos += snprintf` 全部换掉，`int pos` → `size_t pos`。
+  新增静态守卫 **`.build/chk_json_append.py`** 机械禁止裸的 `pos += snprintf`。
+- **`diag` 台账改按 seq 销账**：`request_context_t` 加 `unsigned long seq`，
+  `diag_record_request()` 返回 seq，`diag_record_done(seq, toe)` 按 `seq % DIAG_SLOTS` 精确销账。
+  原实现**按 URL 匹配** ⇒ `GET /api/status` / `GET /api/tasks` 并发同名时，后到的 completion
+  会把 `done` 打到**更早的同名槽** ⇒ `* = in flight` 不可信 —— 这正是这次被误导的根源。
+
+### 验证
+
+- `make linux` rc=0（`-Wall -Werror`）；四道既有静态守卫 0 违规；
+  新增 `.build/chk_json_append.py` → `OK: no raw snprintf accumulation in src/*.c`。
+- **`.build/sfo_unit_test.c` + `.build/sfo-unit-wsl.sh`**：直接驱动**真实 translation unit** 的
+  宿主单元测试（头注释写明它为什么必须存在）。复用 `.build/asan-obj` 并**排除 `src_main.c.o`**、
+  稳态只重编 `src/savemgr.c` —— 绕开 `build-asan.sh` 的 `rm -rf` 撞本机「单回合批量删除」配额。
+  未修复代码**当场炸**：`[keyoff] READ of size 1 @ savemgr.c:349`、
+  `[nentries] READ of size 4 @344`、`[short] READ of size 4 @343`；
+  修复后 `[keyoff]/[paramlen]/[nentries]/[short]` 四 case 全 **clean**。
+- **`.build/cf-2026-1011-sfo.py` 三相反证全 OK**：相 A 删两条 size 守卫 → 红在 `[short]`+`[nentries]`；
+  相 B 同时删外层 `key_off` 门与内层 clamp → 红在 `[keyoff]`；相 C 塞回裸 `pos += snprintf`
+  → 点名 `savemgr.c:1429`。还原后 `savemgr.c` sha256 = `8076c41e…58bcf15`（逐字一致）。
+- 已接入 `.build/verify-linux-wsl.sh`（静态守卫区 + ASan sweep 之后），
+  以后 `wsl.exe -d Ubuntu-22.04 bash < .build/verify-linux-wsl.sh` 一条命令带全。
+
+### 🪤 本轮最值钱的教训：反证相 B 连假三次
+
+1. 只删内层 clamp：外层 `strnlen` 兜底仍在，且构造出的 `buf+4096` 落进 stdio 的 **4 KB 缓冲区**
+   （合法可读）⇒ ASan 看不见。
+2. 把 `key_off` 提到 2 GB：外层 `if (key_off >= fsize)` 先拦掉，循环**根本走不到**
+   ⇒ 必须**同时**删外层门。
+3. 顺手把 `data_off` 也设成 2 GB：`dpos >= fsize` 先 `continue`，`strcmp` **永不执行**
+   ⇒ `data_off` 必须收回界内（40）。
+
+**载荷必须真走到被修的那一行，否则那条反证是"不可能失败的反证"，比没有更糟。**
+
+🪤 反证脚本**不能用反向 patch 还原删除型改动**（`new == ""` 无法反转）——
+先前版本就这样把工作区的 `key_off` 守卫删掉了**还静悄悄继续跑**。现改为
+**从原始文本重新构造变体 + 每相结束都 `write_src(origin_src)`**，读写用 `newline=""`
+（避免 CRLF 归一化导致 sha 比较假失败）。
+
+🪤 `strings` 默认只输出 7-bit ASCII，**中文串 `grep` 恒 0** —— 拿中文串当判据会得出
+"看护不存在"的假结论（同一批里 `guard(refuse-2nd-mount)` 就这样被误报成 0）。
+
+### 已知未动（等用户定夺）
+
+- ~~`api_save_mgr_list` 的 `char out[16384]` 仍在栈上~~ → **已在 §1ad 移到堆**
+  （连同 `api_save_mgr_files` / `api_save_mgr_import_log`，每条请求线程省 ~16 KB 栈）。
+- `savemgr_resign_sfo` 在 `r == -2` 分支里 `strncpy(info.title_id, "UNKNOWN", sizeof(...)-1)`
+  末尾可能无 NUL（既有代码）。
+- `g_arc_src` **无锁全局**（v1.0.12 引入，见 §1ab）：扫描期写、finish 期读；
+  用户若在扫描后又扫了另一个包，finish 会**清错源包**。
+- `sm_kern_run` 超时后 `g_kern_busy` 无出口；启动期 force umount 失败会让整进程禁用挂载
+  （**不是**本次崩溃的原因，但仍是真隐患）。
+- 同一批镜像目前被挂两次（扫描 1 次 + finish 1 次）⇒ 内核挂载调用数翻倍，值得合并。
+
+---
+
+## 1ad. 当前进度（Session 32-34，2026-10-11）：让「崩了却什么都没记」变成「崩了必留证据」+ v1.0.13
+
+### 起因
+
+用户又报「确认覆盖 → 弹进度窗 → 崩」，贴来的台账里三次 SIGSEGV **全部早于**修复版构建时间
+（10-07 10:21 / 10-10 19:14 / 10-10 22:07，最后一条请求都是 `POST /api/save_mgr/list`）。
+真正的问题不是那三次：是**他这次「崩了」在台账里找不到任何新记录**。
+
+### 根因：崩溃处理器自己起不来
+
+`main.c` 的注释早就写着 `a stack-overflow SIGSEGV leaves no room for a stack buffer`，
+但 `install_crash_handler()` 只用裸 `signal()`，**没有 `sigaltstack` + `SA_ONSTACK`**。
+栈溢出时内核是在「线程栈已被压穿」的状态下递送信号的，处理器若用同一条栈执行 ⇒
+**第一条 push 又溢出 ⇒ 处理器自己都进不来 ⇒ 台账一片空白**，用户只剩一句「崩了」。
+光把缓冲改成 static **不够** —— 缺的是那块独立的**执行栈**。
+
+### 四处改动
+
+| # | 改动 | 为什么 |
+|---|---|---|
+| 1 | `sigaltstack` + `SA_ONSTACK`（`static char g_altstack[32768]`） | 栈溢出崩溃**能被记下来**。写死 32768：glibc 2.34+ 的 `SIGSTKSZ` 已改成 `sysconf` 取值，拿它当数组长度编译不过 |
+| 2 | `SA_SIGINFO` + 记 `si_addr` / `si_code` | 越界读写 vs 栈溢出，**排查方向相反**，光看 `SIGSEGV` 三个字分不出来 |
+| 3 | 三处大栈缓冲移到堆（两个 `char out[16384]` + 一个 `char buf[8256]`） | websrv 是 `MHD_USE_THREAD_PER_CONNECTION` ⇒ 这些全压在**每条请求线程的栈**上。`list` 函数原来 ~22 KB，现在 ~6 KB。`out` 直接交给 `send_buffer`，不必再 `strdup` |
+| 4 | 台账启动即写版本：`mango_log("PS5-Mango %s starting (built %s %s)", VERSION_TAG, __DATE__, __TIME__)` | 以后一眼看出「这段记录是哪个版本写的」（上一轮就是被 `[start]` 旧前缀把历史记录当成新崩溃） |
+
+🪤 **`SA_SIGINFO` 必须挂 `sa.sa_sigaction`（三参），不是 `sa.sa_handler`（单参）**；
+glibc / FreeBSD 把这两个成员放在同一个 union 里 ⇒ **宿主 `make linux` 根本不报**
+（那条路径不编译这个函数签名），是设备分支的 prospero-clang 报出来的。
+
+### 🆕 工作流：只编译不链接，验证设备分支
+
+`api_save_mgr_list` / `api_save_mgr_files` / `api_save_mgr_mount` 整段在 `#ifndef __linux__` 里
+⇒ `make linux`（宿主）**结构上编译不到它们**。补这么一步：
+
+```bash
+wsl.exe -d Ubuntu-22.04 --cd "<repo>" bash -c \
+  'export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk; make ps5-obj/src/savemgr.o ps5-obj/src/main.o'
+```
+
+**只出 `.o`、不链接、不落 ELF**（合规：出 ELF 要先问用户）。
+**第一次跑就抓到那个 `sa_handler` 类型错误** —— 一个宿主编译永远抓不到、却会让真机跑不起来的错误。
+**以后改设备分支必须跑这一步。**
+
+### v1.0.13 构建 + 一个「只在 bump 时才红」的 bug
+
+用户确认 payload manager 里显示 `v1.0.12`，批准出 ELF。本轮代码与 v1.0.12 内容不同 ⇒ bump 到 `v1.0.13`。
+
+首次构建末尾 FAIL，但 ELF 其实是对的：
+
+```
+### ELF version staleness (the .o must really be this source) ###
+  v1.0.13
+FAIL: v1.0.13 not found inside PS5-Mango-v1.0.13.elf -- the object is stale
+```
+
+根因：`build-verify-wsl.sh` 的 ELF 版本陈旧检查**硬编码了 `grep -cE "^v1\.0\.12$"`**
+（同段另一行用的才是 `$VER`）。手动复核 `strings -a … | grep -c "v1.0.13"` = **1**、
+`grep -c "v1.0.12"` = **0** ⇒ ELF 新鲜，是脚本误报。改成 `^$VER$` 后全绿。
+**凡以 `VERSION_TAG` 为判据的检查/测试，一律引用变量，不许写死** —— 它不会长红，
+只会在**下次 bump 时**突然变红，而那第一反应会把人带向「产物陈旧」的错方向。
+
+**产物**：`PS5-Mango-v1.0.13.elf`，2342448 B，
+sha256 `d2ca99ee7178dcc33c0de67c68fe032a013acec33512213fcaf06192208fe0e8`
+（`PS5-Mango-linux-v1.0.13` = `76bbc23a271bb05cd54ff51f494ee9b20eb47d4ba08acb65f9885d58d191b4fe`）。
+二次构建 sha **逐字相同** ⇒ 无重链接、产物稳定（`__DATE__/__TIME__` 只进 `main.o`，
+vstamp 机制保证版本不变就不重编）。
+
+**全绿**：`HOST_RC=0` / `PS5_RC=0`；ELF 内容断言 0 失败；TITLE_ID GONE/HIT 正常；
+五道静态守卫 0 违规；hosttest **237 passed, 0 failed**；ASan sweep 无报告；
+`param.sfo` 四 case clean；`OK: only v1.0.13 is embedded`。
+
+### 真机上怎么读新台账
+
+`mango-crash.log` 每次启动的**第一行**是
+`[log …] PS5-Mango <版本> starting (built <日期> <时间>)` —— **先看这一行**确认这段记录属于哪个版本。
+崩溃段现在长这样：
+
+```
+=== PS5-Mango.elf SIGSEGV addr=0x… code=… pid=N time=… ===
+```
+
+`code=1`（`SEGV_MAPERR`）多半是解引用坏指针；`code=2`（`SEGV_ACCERR`）多半是踩到不该写的页
+（栈溢出/写只读页）。`addr` 落在栈边界附近 ⇒ 偏栈溢出。
+
+---
+
+## 1ae. 当前进度（Session 35，2026-10-11）：存档替换按 Garlic 的挂载会话模型重构（方案 B）
+
+**用户诉求原话**：「导入点替换覆盖存档 进程就崩了 而且 进程还存在手动结束了还自动出现，是个
+假进程网页也访问不了」、「存档的替换为什么总有问题 存档页面问题多参考 Garlic SaveMgr 这个项目」、
+「直接按 B 走，我一开始就说了能照搬的全搬过来就好了」。
+
+### 先把 Garlic 的模型读清楚（`.build/garlic-savemgr`，v1.13，2026-08-22）
+
+按 `third-party-impl-recon` 的纪律先看许可证：**该仓库没有 LICENSE 文件**（`README.md` 在、
+`LICENSE*` 不在）⇒ 视为 all rights reserved，**只能搬"事实"（调用顺序 / 结构 / 作者踩过的坑），
+不能搬代码**。这条写在这里，免得日后有人"顺手"把它的函数挪进来。
+
+挖到的事实（每条都能落在代码上）：
+
+| 事实 | Garlic | Mango 旧版 | 处置 |
+|---|---|---|---|
+| **挂载会话** | `mount_save()` 开头 `if (g_mounted) return -1;` —— 已挂着就**拒绝**，绝不"先卸再挂" | 调用方 `if (is_mounted()) unmount();` 且**不看卸载结果** | ✅ 已搬（见下） |
+| **非 `/data/` 路径直挂会 EPIPE** | `/* Direct mount from savedata_prospero causes EPIPE. */` ⇒ 先复制到 `/data/save_files/` 再挂 | 已有同款（复制到 `/data/Mango/tmp`） | 已是同构 |
+| **ioctl 缓冲必须堆分配** | `/* Heap-allocate ioctl buffer — ioctl can corrupt stack beyond bounds */` | 已是 `calloc(1, 0x1000)` | 已是同构 |
+| **挂载期间屏蔽 SIGPIPE** | 无 | `signal(SIGPIPE, SIG_DFL)` 包住 mount | 早已有 |
+| **一次用户动作 = 一次挂载** | `/api/mount` 挂一次 → `/api/write_file` 直接写挂载点 → `/api/unmount` | 扫描 N 次 + 替换 N 次 = **2N** | ✅ 已搬（扫描不再挂载） |
+
+### 四条结构性改动（全部在 `src/savemgr.c`）
+
+1. **挂载会话：拒绝叠加，而不是"静默先卸"**（`savemgr_mount_image`）
+   旧写法把"先卸了再挂"推给调用方且不看结果：一次 `unmount` 超时（-100）后 `g_mounted` 仍是 1，
+   第二次 `mount` 照样发进内核 ⇒ 内核里两个挂载叠着。现在内部接管：替用户卸一次可以，
+   **卸不干净就直接返回 `-104`（楔住）**，让路由层停止这一批。四个调用点的冗余"先卸再挂"已删掉
+   （那是白白多摸一次内核）。
+2. **扫描阶段不再挂载内核镜像**（`api_save_mgr_import_archive`）
+   标题号与目录名从**包内目录结构**推（`<tid>/sdimg_<dir>`，`sm_arc_collect` 本来就在做），
+   "本机是否已有"用这个路径 `stat`。一次导入的内核调用从 **2N 降到 N**。
+   代价：清单里不再显示 `param.sfo` 的 `main_title` —— 列表 UI 本来也不展示它；
+   "其实是覆盖"这一条在替换阶段挂载后**补记进日志**，不静默。
+3. **楔住即止**（`api_save_mgr_import_archive_finish` + 新助手 `sm_kern_wedged()`）
+   判据 = `-100`（看护超时）/ `-101`（上一次还没回来）/ `-103`（线程起不来）/ `-104`（没卸干净）。
+   命中任意一条 ⇒ **立刻停止**，剩余条目记 `skipped`（不是 `failed`）并在响应里给 `wedged:true`。
+   旧代码是"这张失败、接着试下一张" —— 而挂住的是全局互斥的 PFS 挂载层，继续塞会把整台主机拖死。
+   楔住时**不清暂存、不清源包**（重启后还要重试，不想让用户重传几百 MB）。
+   另外每张之间 `usleep(300ms)` 留喘息（Garlic 的 `unmount_save` 也是先 `sync()` 再收工）。
+4. **长循环不再让浏览类路由排队**（`dispatch_save_mgr` + 新助手 `sm_route_is_browsable()`）
+
+### 为什么第 4 条是"网页全打不开"的正解（本轮最值钱的机理）
+
+旧 `dispatch_save_mgr` 除 `import_log` 外**全部** `pthread_mutex_lock`。一次 3 张存档的导入
+（每张 mount+umount，每次看护 60 秒）最坏独占 `g_savemgr_lock` **6 分钟**。这期间
+「刷新列表 / 强制卸载 / 放弃导入」全部排在锁上。
+
+后果比"按钮没反应"严重得多：**浏览器对同一 origin 只有 ~6 条并发连接**。存档页同时在飞的
+请求（`list` / `files` / `unmount` / 取消 / `status` / `tasks`）很容易把 6 条全占满 ⇒
+**连 `/api/status` 都发不出去** ⇒ 用户看到的就是「进程还在、网页全打不开、点了没用」。
+服务端是 `MHD_USE_THREAD_PER_CONNECTION`，那些线程也就一直挂着。
+
+⇒ 浏览类路由（`list` / `files` / `unmount` / `import_archive_cancel`）改用 **`pthread_mutex_trylock`**：
+拿不到就**立刻**回 `503 {"error":"busy"}`。前端据此说人话（「后台正在导入存档，稍后自动刷新」，
+4 秒后自己再试一次），页面保持可用。**这条与 D-state 无关 —— 纯用户态，改完即生效。**
+
+### 前端（`assets/index.html`）
+
+`renderSaveMgrList` 认 `busy`（温和自动重试，不弹 toast）；「卸载 / 取消 / 放弃」三个按钮在
+`busy` 时明说「后台正在导入，等它结束」而**不假装失败、也不隐藏文件区**；
+归档导入的终止分支新增 `j.wedged` ⇒ 说清「已成功 N 份、M 份未处理，请**重启主机**后再来一次，
+源包和暂存都留着」。清单文案改为「标题号取自包内目录名」（不再是「未读到 param.sfo」——
+扫描阶段本来就不读了，那不是出错）。
+
+### 验证
+
+`make linux` / `make all` HOST_RC=0（`-Wall -Werror`）；**设备分支只编译不链接**
+（`make ps5-obj/src/savemgr.o`）也干净 —— 这条路径宿主编译不到，v1.0.13 那次就是靠它抓到的
+编译错误，本轮已固化成习惯。hosttest **237 passed, 0 failed**；ASan sweep 无报告；
+`param.sfo` 四 case clean；前端真 Chromium **175 / 175**。
+
+新增静态守卫 **`.build/chk_arc_mount_budget.py`**（四条不变量：`scan-mounts` / `wedge-stop` /
+`busy-lock` / `stack-mount`），已接进 `verify-linux-wsl.sh` 与 `build-verify-wsl.sh`。
+反证 **`.build/cf-2026-1011-arcbudget.py`** 四相全部转红、且**红在对的检查名上**，
+还原后 `savemgr.c` sha256 逐字一致。
+
+⚠️ 写这条守卫时踩了一次坑：`savemgr_mount_image` 的返回类型与函数名**在同一行**（不在列 0，
+和 `api_save_mgr_import_archive` 那种"返回类型单独一行"的风格不一致），而且它**有设备/宿主两个
+同名定义**。所以定位函数体不能锚在"列 0 的函数名"，要锚在「名字 + 配平括号后紧跟 `{`」；
+`must_present` 检查用"任一函数体命中"，`not must_present` 用"任一命中即违约"。
+
+---
+
 ## 2. 仓库结构（已落地）
 
 ```
-ps5-nexus/
+ps5-mango/
 ├── Makefile              # 模块集 = 新编排层；已补 -lkernel_sys + 第一方 flag-stamp（见 §1d/§1e）
 ├── LICENSE / README.md / HANDOVER.md（本文件）/ docs/PLAN.md
 ├── .gitignore            # 适配新名 + 编排层测试 scratch
@@ -912,7 +1464,7 @@ ps5-nexus/
 - 🪤🪤 **`strings` 只输出 ASCII** ⇒ 拿它查中文串**恒 MISS**，会把「代码明明进了二进制」误判成没进
   （本轮 `fs_guard` 的 7 条中文报错第一次全被误判）。查 UTF-8 必须字节级检索：
   `python3 -c "print(s.encode() in open('x.elf','rb').read())"`。`strings` 只适合查 ASCII 标识符
-  （`.nexus-probe-`、`REQ/DONE/SENT` 这类）。
+  （`.mango-probe-`、`REQ/DONE/SENT` 这类）。
 - 🪤🪤 **`/mnt/c`（WSL 9p/drvfs）不实施 Unix 权限位**：`chmod 0555` 返回 0，`stat` 读回仍是 **777**。
   ⇒ 任何「不可写应被拒绝」的断言会**静默空转**，而**一个从不拒绝的闸门看起来完全健康**。
   处置：① 测试先验证夹具前提（chmod 后 `stat` 确认真的变成 0555）才断言，否则打印跳过；
@@ -958,9 +1510,9 @@ ps5-nexus/
 3. ~~**Phase 0 本机半**：备测量脚本（`misc/bench_extract.c` 壳 + `misc/bench_fixtures.py` 本机原型，已跑通验证方法论）+ 预检清单（`docs/phase0-benchmarks.md`）+ 竞品源码级核实（已完成，见 `docs/competitor-audit.md`：elf-arsenal 有 libsmb2 SMB+miniz ZIP、无 RAR/7z/NFS；VoidShell 闭源无法核实）。~~ ✅ **已完成（Session 4）**。待办转为**真机 4 项实验**（singleDPI 装 fPKG / AuthID 提权链 / 同形状解压计时 / 写盘上限 T_copy、内置 vs exFAT 写速、libsmb2 拉取实测），等机器到位。
 4. ~~**按契约头实现编排层**~~ ✅ **已落地（Session 5，见 §1d）**：8 个模块全写出，4 个本机可测套件 **76 项断言全绿**；4 个 SDK 档模块**已写但本机未编译**（httpd 缺 libmicrohttpd；安装/存档缺 PS5 SDK）。剩余工作：
    - **SDK 机首次编译（必做）**：逐个核对 `extern` 原型 —— 尤以 **MetaInfo `0x30`（✅ 四源交叉已闭合）**、**pfsmgr ioctl** 符号名为要。🆕✅ **`sceAppInstUtilInstallByPackage` 的签名问题已修复（2026-09-30）**：旧代码把**路径**当了首参，而真签名首参是**元数据结构体**（`(meta, info, playgo)`）⇒ 系统拿路径串当地址解引用 6 个指针，**必失败/最坏崩，且编译期不暴露**（自己的 extern 声明自洽，`_Static_assert(sizeof)` 也只证自身一致）。现按真签名调用，并已用 **prospero-clang 18 + `-Werror` 编过 + 链进 ELF**；`$SDK/target/lib/libSceAppInstUtil.so` 已验证**确实导出**那四个符号（⇒ 直连即可，不需要 `kernel_dynlib_resolve`）。原理 + 逆向出的**三阶段 HTTP 协议** + 取证见 **`docs/pkg-install-without-usb.md`**（落地记录 §7，**真机 7 条待核 §7.5**）。
-   - **transfer 接 smb/nfs（SDK 机）**：~~vendored libsmb2/libnfs 后开 `NEXUS_HAVE_LIBSMB2`/`NEXUS_HAVE_LIBNFS`~~ ✅ **代码已落地（Session 15，见 §1n）**：`third_party/libsmb2`（v6.0.0）+ `third_party/libnfs`（8.0.0）已 vendor，`Makefile` `LIBSMB2=1`/`LIBNFS=1` 开关 + per-target flag，`transfer.c` 宏守卫四函数实现完毕，本机验证链全绿（URL 解析 19 + scheme_supported 契约 6 断言、双库全 TU 编译、宏开链接冒烟跑绿）。**剩 SDK 机两步**：① `make LIBSMB2=1 LIBNFS=1` 实编译过链接；② 真机连 NAS 验证 smb/nfs 拉取。local 后端与既有测试用例一行不用改。
+   - **transfer 接 smb/nfs（SDK 机）**：~~vendored libsmb2/libnfs 后开 `MANGO_HAVE_LIBSMB2`/`MANGO_HAVE_LIBNFS`~~ ✅ **代码已落地（Session 15，见 §1n）**：`third_party/libsmb2`（v6.0.0）+ `third_party/libnfs`（8.0.0）已 vendor，`Makefile` `LIBSMB2=1`/`LIBNFS=1` 开关 + per-target flag，`transfer.c` 宏守卫四函数实现完毕，本机验证链全绿（URL 解析 19 + scheme_supported 契约 6 断言、双库全 TU 编译、宏开链接冒烟跑绿）。**剩 SDK 机两步**：① `make LIBSMB2=1 LIBNFS=1` 实编译过链接；② 真机连 NAS 验证 smb/nfs 拉取。local 后端与既有测试用例一行不用改。
    - ~~**worker 抽干 QUEUED 任务**~~ ✅ **已完成（Session 7，见 §1f）**：`src/worker.c` 单线程 tick 驱动 6 类任务、4 槽位并发、取消不留半截产物、shutdown 绝不 commit；`/api/fetch` 新增；安装/备份/恢复统一入队。**后端链路至此从「入队」贯通到「真的执行」**。
-   - ~~**解压引擎接进 worker**~~ ✅ **已完成（Session 8，见 §1g）**：`src/extract_engine.c` 新契约适配器落地，worker `step_extract` 走 `nexus_extract_req_t`（密码/large/progress/cancel），失败带原因（`task note` → JSON 快照 `"note"`）。**含密码/分卷路径**（相对竞品的真真空）。测试 +40。
+   - ~~**解压引擎接进 worker**~~ ✅ **已完成（Session 8，见 §1g）**：`src/extract_engine.c` 新契约适配器落地，worker `step_extract` 走 `mango_extract_req_t`（密码/large/progress/cancel），失败带原因（`task note` → JSON 快照 `"note"`）。**含密码/分卷路径**（相对竞品的真真空）。测试 +40。
    - **UI 可开始接入**：API 面已定（17 条路由，见 §1e/§1f），`assets/index.html`（Harness）可把假数据换成真 `fetch`；任务视图直接消费 `/api/tasks`。
 5. **UI 并行轨道**：~~每完成一个后端 Phase，同步把对应视图接进 `assets/index.html`（Harness），跑 106 项验收。本机地址 / 端口 / kstuff 一律取 `/api/status`（**端口必须服务端上报**）。~~ **已完成（Session 9–14，见 §1h/§1i/§1j/§1k/§1l/§1m）**：任务视图 + 顶栏状态 + 解压对话框（password/large）+ 文件视图真目录树 + 落点点选（`fsNav` 工厂）+ **安装/上传视图**（library 接 `/api/pkg/scan` 动态渲染 + 搜索/平台筛选 + 安装入队 `/api/pkg/enqueue` + 从 NAS 拉取 `/api/fetch` + **上传切片续传**：JSON meta + `\n\n` + 原始切片，8 MiB 分片、任务中心进度，Session 14 见 §1m）+ **任务视图安装大卡**（install 任务分叉百分比口径，进度走 `/api/install/poll`）+ **均速真值**（快照 `rate` = 总字节÷总耗时，UI 均速读服务端字段，install/无 rate 诚实 `—`），验收走 `.build/ui_live_check.mjs`（**Session 21 已扩到 153 项**：新增合并后的上传菜单、`File` 句柄回归位、删除全链路、关闭进程；mock 同源后端）；静态 demo 106 项回归保持绿。**剩**：① transfer 接 smb/nfs 的 SDK 机实编译 + 真机 NAS 验证（代码交付见 §1n，连接级验证清单见 §1o）；② ~~fetch/extract 的 form URL 解码缺口（`%2F` 落盘，见 §1m 坑）待真机验证后单开 Session~~ ✅ **已修（Session 15，见 §1m）**：`api_body_value` form 分支补 `url_decode_range`（`%XX`/`+` 解码），host +5 断言，api suite 150 checks 全绿；JSON/上传切片分支不受影响。
 6. ~~**金手指域**~~ ⛔ **已整体移除（Session 19，见 §1p）**：用户拍板砍掉金手指**所有**功能，本插件只做文件管理。后端引擎（cheatmgr/cheat_sync/cheat_parse/cheat_remote/hijack_stub）、`/api/cheat/*` 路由、前端视图、测试套件、SDK 清单 C/D 段**全部删除**。金手指文件由文件管理器当普通文件覆盖。
@@ -1000,10 +1552,10 @@ ps5-nexus/
        等它跑到一半才失败 —— 若仍先「开始」再失败，说明预检没生效。
     2. **可写**：把目标目录设成不可写（或在 exFAT 上用只读挂载）后**复制 / 解压 / 上传**进去 ⇒ 期望
        同样**开跑前**拒绝（「目标不可写 …」），同样不建任务。
-    3. ⚠️ **判据不是 `strerror` / mode 位** —— 探测手段是**真建一个 `.nexus-probe-*` 文件再 unlink**。
+    3. ⚠️ **判据不是 `strerror` / mode 位** —— 探测手段是**真建一个 `.mango-probe-*` 文件再 unlink**。
        若真机上没拒绝，先看**挂载点文件系统**（FAT/exFAT 无 mode 位、payload 可能提权 ⇒ mode 位不描述
        我们能做什么），再把 `GET /api/diag` 的 `REQ` 行带回来。探测**绝不能留下文件**：跑完 `ls -a` 目标
-       目录应看不到 `.nexus-probe-`。
+       目录应看不到 `.mango-probe-`。
     4. **同时回归「不误伤」**：同盘 **move**（rename）**必须照旧成功**（它不需要空间，预检刻意只查可写）；
        `FS_GUARD_UNKNOWN`（读不到 `statvfs`，如部分网络/伪文件系统）**必须放行**，不许变成新的拒绝理由。
 12. **权限规则的 P1 补完（Session 25，见 §1v）** —— 两条都只有在真机上才看得见，且都要**分文件系统**验：
@@ -1016,3 +1568,19 @@ ps5-nexus/
        `nx_fs_type_lacks_unix_modes()` 存在的理由，别把它当成失败报。
     3. **判据不是 `strerror`**：`strace` 若可用，上传开始时应看到 `fchmod` 而非 `chmod`；
        没有 `strace` 就看 `ls -l` 在**传输过程中**（未结束时）是否已经是 777。
+13. **目录统一 `/data/Mango` + 日志集中 + PKG 装完自动删（Session 17，见 §1x）** —— 真机必测：
+   1. 新目录布局 `/data/Mango/{incoming,tmp,backups,logs}` 由 main 启动自动建（此前旧目录 `/data/wfm`、
+      `/data/save_files`、`/data/backups` 与根目录日志是旧版本写的，新代码不再碰，需手动清理）。
+   2. **PKG 上传 → 安装完成** ⇒ `incoming` 里本次上传的那个 PKG **自动消失**（装完自动删）；toast「安装完成，暂存 PKG 已清理」。
+   3. **已安装/残留跳过** ⇒ PKG **保留** + toast「安装器跳过…PKG 保留在 /data/Mango/incoming」。
+   4. 三份日志出现在 `/data/Mango/logs/`：`mango-crash.log` / `mango-install.log` / `mango-save.log`；/data 根目录不再新增日志。
+   5. 存档页备份 → `/data/Mango/backups/<tid>/`；解密/加密/改签临时镜像在 `/data/Mango/tmp/` 且前缀 `_nex_*`。
+14. **上传同名冲突选择（Session 17 追加，见 §1x）** —— 真机必测：向已有同名文件的目录上传 → 弹「同名文件已存在」三选窗；覆盖 → 后端走 overwrite 路径成功；重命名 → 落盘为 `name (1).ext`；跳过 → 不发请求、批次汇总计入失败数；后端已存在且列表未刷新（409）→ 同样弹窗兜底。
+15. **长导入的进度窗 + 崩溃自恢复（Session 27，见 §1y）** —— 这一轮全部要真机验，宿主套件结构上覆盖不到（样本包几 KB 永远绿）：
+    1. **进度窗真的有字**：拿一个**几百 MB 的加密存档整包 ZIP** 走「加密镜像 · 替换」。期望：弹窗里**逐行滚出**步骤（解包 → `（n/N）读取 XXX 的存档信息…` → 替换落盘），**进度条按百分比前进**。若弹窗开着但**一行都没有**、状态行一直停在「准备中…」⇒ 就是本轮修掉的那个非法 JSON 复发（去抓 `curl -s http://<IP>:2026/api/save_mgr/import_log` 的**原始响应**，肉眼确认是合法 JSON）。
+    2. **算不出总量时不许编造**：进度条应保持**滚动**且状态行**没有百分号**。出现假百分比同样是 bug。
+    3. **中途刷新页面**：趁任务在跑刷新 ⇒ 弹窗**自动重新出现**并接着报进度；任务跑完后弹窗**自动收起**。
+    4. **不再吃满内存**：传大包时在另一个终端看内存占用 —— 不应出现「整包大小量级的单次跳升」（旧实现是 `malloc(zsize)`）。
+    5. **崩溃后自恢复**：任务进行中直接**断电/强杀**，重新注入 payload ⇒ `/data/Mango/logs/mango-*.log` 里应能看到启动清理（`_nex_*` 被删、空闲空间报告）；`/data/Mango/tmp` 里**不应再有** `_nex_arc` / `_nex_zip_*` / `_nex_up_*`；且**插件功能可用**（不是「进程在、点啥都没反应」）。
+    6. **结束进程不再自启**：进程卡住时结束它 ⇒ **不应**反复自动重启。若日志里出现 `kill(N) FAILED: ... uninterruptible kernel call`，那是**预期记录**（老进程卡在内核里带不走），新进程应当**照常起来**并可用 —— 而不是秒退再被拉起来。
+    7. ⚠️ 判据是**屏幕上的字和条**与**日志行**，不是「弹窗打开了」。它本来就会打开 —— 这正是上一版一直空白却没人发现的原因。

@@ -1,4 +1,4 @@
-/* nx_fs.h - "everything Nexus creates on the console is 0777", in one place.
+/* nx_fs.h - "everything Mango creates on the console is 0777", in one place.
  *
  * The console is not a desktop. The files a game is made of must be
  * executable, and the homebrew we deploy into /data/homebrew is launched by

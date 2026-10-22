@@ -44,7 +44,7 @@
 ### B2. SMB 拉取真机验证（连通 `make LIBSMB2=1` 产物）
 1. 起 SMB 服务器：真 NAS 现成 share，或本机 `smbd`（`[share] guest ok = yes`）；先确认 `ss -ltn | grep :445` 空闲（FreeBSD 无 Windows 端口冲突）。
 2. 放测试文件（如 `games/hello.pkg`），记 `sha1sum`。
-3. 启动 nexus 产物 + HTTP，用产品路径验证（api.c 直调 `transfer_open(scheme,path)`）：
+3. 启动 mango 产物 + HTTP，用产品路径验证（api.c 直调 `transfer_open(scheme,path)`）：
    - 列目录：`GET /api/fs/list?path=smb://<host>/<share>/games` → 列出 `hello.pkg`，type 正确。
    - 拉取：`POST /api/fetch {src:smb://<host>/<share>/games/hello.pkg, dst:<本地>, scheme:smb}` → task_id → 轮询 `/api/tasks` → **DONE**。
    - 校验：dst 文件 `sha1sum` == 源 `sha1sum`。
@@ -56,7 +56,7 @@
 3. 同 B2 第 3 步走 `/api/fs/list` + `/api/fetch` 校验字节一致。
 
 ### B4. 连接前断言保持绿（宿主已锁，SDK 机应继续绿）
-URL 解析五种形式（`smb://`/`nfs://`/`//host/share`/裸 `host/share`/`host:/export`）、`scheme_supported` 契约（未知 scheme=0、未编入后端=0）、惰性 open（URL 错在 open 报，连接错在 list/read/size 以 `NEXUS_ERR_NOTFOUND` 浮出）。
+URL 解析五种形式（`smb://`/`nfs://`/`//host/share`/裸 `host/share`/`host:/export`）、`scheme_supported` 契约（未知 scheme=0、未编入后端=0）、惰性 open（URL 错在 open 报，连接错在 list/read/size 以 `MANGO_ERR_NOTFOUND` 浮出）。
 
 ---
 
@@ -89,7 +89,7 @@ URL 解析五种形式（`smb://`/`nfs://`/`//host/share`/裸 `host/share`/`host
   **账号 hex 无法从 title id 推导 ⇒ 这一级必须枚举目录**（`probe_save_home` / `scan_save_accounts`），
   不能拼字符串。真机必核：`/api/save/scan` 能列出存档、`/api/save/list` 的 `save_found=true`、
   且两者对「哪些存档存在」的答案必须一致（同一份代码里两处用不同层级顺序 = 一处说有、一处说没有）。
-- 🆕 **恢复前安全副本不许留在存档叶里（2026-10-02 修）**：`<存档目录>.wfm-pre-restore` 是回滚源，
+- 🆕 **恢复前安全副本不许留在存档叶里（2026-10-02 修）**：`<存档目录>.nex-pre-restore` 是回滚源，
   回写成功后必须删掉（原来是 `unlink()`：对目录恒失败 ⇒ 副本永不回收、还会被 `/api/save/scan`
   当成一个「游戏」列出来）。真机核：恢复后存档叶里只剩该 title 一个目录。
 - **worker 任务流真机回归**：fetch/install/extract 各类任务 DONE、取消不留半截产物、shutdown 不 commit（宿主已验逻辑的真机端到端）。

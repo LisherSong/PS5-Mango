@@ -1,6 +1,6 @@
 #ifndef EXTRACT_ENGINE_H
 #define EXTRACT_ENGINE_H
-/* Nexus-facing entry point for the archive engines (ZIP / RAR / 7z, incl.
+/* Mango-facing entry point for the archive engines (ZIP / RAR / 7z, incl.
  * encrypted + multi-volume — the inherited, host-tested leaves).
  *
  * Why a new header instead of the inherited extract.h: that one is the OLD
@@ -22,46 +22,46 @@
  * with no denominator, so every extraction bar sat at 0 % and the only honest
  * thing the UI could show was a spinner. Returning non-zero aborts the unpack
  * (the engines are also polled through `cancel`, which is the cheaper channel).
- * During NEXUS_PHASE_SCAN `total` is still growing — the caller must not
+ * During MANGO_PHASE_SCAN `total` is still growing — the caller must not
  * publish it yet. */
-#include "nexus_common.h"
+#include "mango_common.h"
 
 typedef enum {
-  NEXUS_PHASE_SCAN = 0,
-  NEXUS_PHASE_EXTRACT = 1,
-  NEXUS_PHASE_PUBLISH = 2,
-  NEXUS_PHASE_CLEANUP = 3
-} nexus_extract_phase_t;
+  MANGO_PHASE_SCAN = 0,
+  MANGO_PHASE_EXTRACT = 1,
+  MANGO_PHASE_PUBLISH = 2,
+  MANGO_PHASE_CLEANUP = 3
+} mango_extract_phase_t;
 
-typedef int (*nexus_extract_progress_fn)(int phase, uint64_t done,
+typedef int (*mango_extract_progress_fn)(int phase, uint64_t done,
                                          uint64_t total, const char *current,
                                          void *ctx);
-typedef int (*nexus_extract_cancel_fn)(void *ctx);
+typedef int (*mango_extract_cancel_fn)(void *ctx);
 
 typedef enum {
-  NEXUS_CONFLICT_FAIL = 0,
-  NEXUS_CONFLICT_OVERWRITE = 1,
-  NEXUS_CONFLICT_MERGE = 2
-} nexus_conflict_t;
+  MANGO_CONFLICT_FAIL = 0,
+  MANGO_CONFLICT_OVERWRITE = 1,
+  MANGO_CONFLICT_MERGE = 2
+} mango_conflict_t;
 
 typedef struct {
-  nexus_conflict_t           conflict;
+  mango_conflict_t           conflict;
   const char                *password; /* NULL or "" when the caller has none */
   int                        large;    /* !=0 -> the LARGE limit profile
                                           (2 TiB total / 1 TiB per file). The
                                           caller must have checked free space;
                                           the safe profile is the default. */
-  nexus_extract_progress_fn  progress;
-  nexus_extract_cancel_fn    cancel;
+  mango_extract_progress_fn  progress;
+  mango_extract_cancel_fn    cancel;
   void                      *ctx;
-} nexus_extract_req_t;
+} mango_extract_req_t;
 
 typedef struct {
-  nexus_err_t err;
+  mango_err_t err;
   char message[192]; /* human-readable, already translated by the engines */
-} nexus_extract_result_t;
+} mango_extract_result_t;
 
-nexus_err_t nexus_extract(const char *archive_path, const char *dst_dir,
-                          const nexus_extract_req_t *req,
-                          nexus_extract_result_t *out /* may be NULL */);
+mango_err_t mango_extract(const char *archive_path, const char *dst_dir,
+                          const mango_extract_req_t *req,
+                          mango_extract_result_t *out /* may be NULL */);
 #endif

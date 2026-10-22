@@ -14,4 +14,5 @@ enum MHD_Result api_pkg_icon(struct MHD_Connection *conn, const char *body,
  * to call /api/pkg/info per file. */
 int pkg_info_read_meta(const char *path, char *title_id, size_t tid_sz,
                        char *title, size_t title_sz, char *version, size_t ver_sz,
+                       char *content_id, size_t cid_sz,
                        unsigned long long *total_size);

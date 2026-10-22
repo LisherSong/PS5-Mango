@@ -771,6 +771,15 @@ int smb2_fsync(struct smb2_context *smb2, struct smb2fh *fh);
 uint32_t smb2_get_max_read_size(struct smb2_context *smb2);
 uint32_t smb2_get_max_write_size(struct smb2_context *smb2);
 
+/* WFM: current SMB2 credit balance.
+ * smb2_pread_async()/smb2_pwrite_async() **silently** shrink the requested
+ * length to credits*65536 when the balance is short (and to 0 when it is
+ * empty), and a caller that advances its offset by the length it *asked for*
+ * then skips the bytes that were never requested. An async pipeline must
+ * therefore size its own requests; this accessor is what makes that possible
+ * without reaching into struct smb2_context. */
+int smb2_get_credits(struct smb2_context *smb2);
+
 struct smb2_read_cb_data {
         struct smb2fh *fh;
         uint8_t *buf;

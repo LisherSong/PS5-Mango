@@ -1,8 +1,8 @@
-# PS5 Nexus — 落地方案（Implementation Plan）
+# PS5 Mango — 落地方案（Implementation Plan）
 
-> ⚠️ **本文档描述的是 `ps5-nexus` 那棵树（"重写"路线的执行计划），不是本仓库。**
-> 本仓库以 **owendswang/ps5-web-file-manager 最新版后端**为底座，搬入 NEXUS 的前端 UI
-> 与 PKG / 存档能力，产物 `PS5-Nexus-v1.0.0.elf`，端口 `2026`。
+> ⚠️ **本文档描述的是 `ps5-mango` 那棵树（"重写"路线的执行计划），不是本仓库。**
+> 本仓库以 **owendswang/ps5-web-file-manager 最新版后端**为底座，搬入 MANGO 的前端 UI
+> 与 PKG / 存档能力，产物 `PS5-Mango-v1.0.0.elf`，端口 `2026`。
 > 本文里的**模块划分、文件路径、ELF 名都不适用于本仓**；引用到的
 > `../ps5-nas-rewrite-proposal.html`、`../ps5-ui-demo-*.html` 也不在本仓内（它们是仓库外的设计稿）。
 > **本仓的现状看 `README.md` 与 `REAL-CONSOLE-CHECKLIST.md`。**
@@ -17,7 +17,7 @@
 
 | 项             | 值                                                                              |
 | ------------- | ------------------------------------------------------------------------------ |
-| 名称 / 仓库 / ELF | **PS5 Nexus** / `ps5-nexus` / `ps5-nexus`                                      |
+| 名称 / 仓库 / ELF | **PS5 Mango** / `ps5-mango` / `ps5-mango`                                      |
 | 默认端口          | **2026**（避开 8888/9021/9090·12800/1337/9081）                                    |
 | 形态            | 单 ELF + 端口 + gzip 内嵌前端，**纯网页、不写 app/Electron**                                 |
 | 四个能力域         | ① NAS 互通 ② 解压引擎（7z/RAR/ZIP + 加密 + 分卷）③ 大文件吞吐与续传 ④ 存档管理（P1）                 |
@@ -32,7 +32,7 @@
 
 ## 1. 仓库策略（inherit ≈40%）
 
-- **新仓库** `ps5-nexus`（位置 `…/Web File Manager/ps5-nexus/`）。区别于旧仓 `ps5-web-file-manager`（仅保留作引擎/测试/工具链来源）。
+- **新仓库** `ps5-mango`（位置 `…/Web File Manager/ps5-mango/`）。区别于旧仓 `ps5-web-file-manager`（仅保留作引擎/测试/工具链来源）。
 - **从旧仓继承（≈40%，直接搬、主体不动）**：
   - 解压引擎：`src/extract*.c` + ZIP/RAR/7z 解码子集（含 7zAES/`-mhe=on`/ZipCrypto/WinZipAES/`-p`/`-hp`）
   - 复制管道（8 MiB × 3 slot 双缓冲）、PKG SFO 解析、`json_util.c` / `path_util.c`（字节映射）
@@ -55,11 +55,11 @@
 
 ---
 
-## 3. 目录布局（ps5-nexus）
+## 3. 目录布局（ps5-mango）
 
 ```
-ps5-nexus/
-├── Makefile                 # VERSION_TAG + 产物名 ps5-nexus + 端口 2026 + flag-stamp 修 make 短路
+ps5-mango/
+├── Makefile                 # VERSION_TAG + 产物名 ps5-mango + 端口 2026 + flag-stamp 修 make 短路
 ├── LICENSE                  # GPL-3.0（已拷）
 ├── README.md               # 指向本方案 + 与旧仓差异
 ├── src/
@@ -138,8 +138,8 @@ ps5-nexus/
 
 ## 7. 本会话可立即落地的事（Session 1 Build Order，无需真机）
 
-1. **建仓库骨架**：`ps5-nexus/` 目录树（已建）、`git init`、`LICENSE`（已拷）、`README.md`（指向本方案 + 与旧仓差异）。
-2. **移植构建工具链**：`Makefile`（改 `VERSION_TAG`、产物名 `ps5-nexus`、端口 2026、加 flag-stamp）、`build-elf-wsl.sh`/`build-elf.sh`/`install-libmicrohttpd.sh`/`gen-asset-module.py` 复制并改名、`.build/check-elf-gzip.py` 复制。
+1. **建仓库骨架**：`ps5-mango/` 目录树（已建）、`git init`、`LICENSE`（已拷）、`README.md`（指向本方案 + 与旧仓差异）。
+2. **移植构建工具链**：`Makefile`（改 `VERSION_TAG`、产物名 `ps5-mango`、端口 2026、加 flag-stamp）、`build-elf-wsl.sh`/`build-elf.sh`/`install-libmicrohttpd.sh`/`gen-asset-module.py` 复制并改名、`.build/check-elf-gzip.py` 复制。
 3. **播种前端（主 UI = Harness）**：`assets/index.html` 以 demo5（Harness/E 暗色蓝）为**主 UI 基**；`assets/install.html` 以 demo5（E）为首屏/安装页；抽取 Harness(E) demo 的令牌与组件为 `assets/main.css` + `assets/main.js`（冻结视觉规范）；`lang-*.js` 沿用。
 4. **移植验收闸门**：`.build/ui_demos_check.mjs`（106 项）+ `.build/proposal_check.mjs`；把 demo 假数据约定带进真实 API stub。
 5. **移植第一个可编译后端模块**：解压引擎 + 复制管道 + PKG SFO（host 侧用 MinGW 跑 177+27 测试矩阵）；安装/存档/传输层留**接口占位**（`.h` + 桩），真机阶段再填。
@@ -150,7 +150,7 @@ ps5-nexus/
 
 8 个契约头全部落地，**分两档**（详见 `HANDOVER.md` §1d）：
 
-- **A 档（本机 MinGW 可编译 + 可测，76 项断言全绿）**：`task_engine.c`（统一任务中心 + 跨重启 journal）、`copypipe.c`（原子落盘）、`transfer.c`（local 后端；smb/nfs 用 `NEXUS_HAVE_LIBSMB2`/`NEXUS_HAVE_LIBNFS` 守卫，缺库返回 NULL）、`pkg_sfo.c`（**新写**，替代与旧 server 耦合的 `pkg_info.c`）、`pkg_lib.c`（深扫 + 入队）。跑法 `tests/run-orchestration-tests.sh`。
+- **A 档（本机 MinGW 可编译 + 可测，76 项断言全绿）**：`task_engine.c`（统一任务中心 + 跨重启 journal）、`copypipe.c`（原子落盘）、`transfer.c`（local 后端；smb/nfs 用 `MANGO_HAVE_LIBSMB2`/`MANGO_HAVE_LIBNFS` 守卫，缺库返回 NULL）、`pkg_sfo.c`（**新写**，替代与旧 server 耦合的 `pkg_info.c`）、`pkg_lib.c`（深扫 + 入队）。跑法 `tests/run-orchestration-tests.sh`。
 - **B 档（已写，待 SDK 机编译）**：`httpd.c`（libmicrohttpd；缺库本机不编）、`pkg_installer.c`（kstuff 路线 + AuthID `…0006` + MetaInfo `0x30`）、`savemgr.c`（5 条硬规则 + 强制快照）、`main.c`（接线）。
 - **构建**：`Makefile` 模块集换成编排层，并**补 `-lkernel_sys`**；`pkg_info.c/h`（依赖未继承的 `websrv.h`/`filemgr_internal.h`）与 `extract.c`（旧 MHD 端点）刻意不入构建，前者由 `pkg_sfo.c` 取代。
 
@@ -174,7 +174,7 @@ ps5-nexus/
 
 - **`src/worker.c/.h`（A 档，本机可测 19 项）**：单线程 `worker_tick()` + 4 槽位并发，按 kind 分派 fetch / install / extract / backup / **restore**；每步轮询 `task_cancelled()`，`worker_shutdown()` **只丢弃、绝不 commit** 半截产物。
 - **`task_engine` 增补** `task_payload_t` + `task_set_payload()`：任务要带**载荷**（源/目标/快照），否则 worker 不知道该干什么。`task_kind_of()` 公开。
-- **`nexus_common.h` 增补** `TASK_KIND_RESTORE`：恢复与备份是两条独立路径，共用一个 kind 会让回滚语义含糊。
+- **`mango_common.h` 增补** `TASK_KIND_RESTORE`：恢复与备份是两条独立路径，共用一个 kind 会让回滚语义含糊。
 - **`transfer_size()`**：worker 需提前知道总字节才能 `task_set_total`。
 - **`api.c` 语义统一**：安装/备份/恢复改为「入队 + worker 驱动」，新增 `/api/fetch`（NAS 拉取）。**入队不再触碰数据源** ⇒ 失败以「任务 FAILED」暴露，更贴近 UI 所见。
 - **`src/extract_engine.h`**：解压引擎契约头 —— worker 只依赖契约，不依赖具体 zip/rar/7z 实现。

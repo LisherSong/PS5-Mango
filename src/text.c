@@ -112,7 +112,7 @@ read_file_bytes(const char *path, size_t max, unsigned char **data,
   return 0;
 }
 
-/* NEXUS /api/fs/read: returns JSON {ok, mime, size, truncated, version, data(base64)}. */
+/* MANGO /api/fs/read: returns JSON {ok, mime, size, truncated, version, data(base64)}. */
 enum MHD_Result
 api_text(struct MHD_Connection *conn, const char *body, size_t body_size) {
   char *path = req_param(conn, body, body_size, "path");
@@ -211,7 +211,7 @@ write_text_atomic(const char *path, const char *body, size_t body_size,
   int n;
 
   clock_gettime(CLOCK_MONOTONIC, &now);
-  n = snprintf(temp, sizeof(temp), "%s.wfm-%ld-%ld.tmp", path,
+  n = snprintf(temp, sizeof(temp), "%s.nex-%ld-%ld.tmp", path,
                (long)getpid(), now.tv_nsec);
   if(n < 0 || (size_t)n >= sizeof(temp)) {
     errno = ENAMETOOLONG;

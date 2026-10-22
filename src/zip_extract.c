@@ -24,6 +24,7 @@
 
 #include "zipx_volume.h"
 #include "zipx_volstream.h"
+#include "path_ops.h"   /* path_remove_tree(): no libmicrohttpd -I out here */
 
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
@@ -31,8 +32,8 @@
 
 #define ZIPX_IO_BUFFER (128 * 1024)
 #define ZIPX_TMP_ATTEMPTS 64
-#define ZIPX_STAGING_PREFIX ".wfm-extract-"
-#define ZIPX_PART_PREFIX ".wfm-part-"
+#define ZIPX_STAGING_PREFIX ".nex-extract-"
+#define ZIPX_PART_PREFIX ".nex-part-"
 #define ZIPX_PUBLISH_MAX_DEPTH 128
 #define ZIPX_SPACE_SLACK_PER_ENTRY 512
 
@@ -497,39 +498,9 @@ make_staging(zipx_ctx_t *c, const char *parent) {
 }
 
 static void
-remove_tree(const char *path) {
-  DIR *dir = opendir(path);
-  struct dirent *ent;
-
-  if(!dir) {
-    rmdir(path);
-    return;
-  }
-  while((ent = readdir(dir))) {
-    char child[ZIPX_PATH_MAX];
-    struct stat st;
-
-    if(!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) {
-      continue;
-    }
-    if(snprintf(child, sizeof(child), "%s/%s", path, ent->d_name) >=
-       (int)sizeof(child)) {
-      continue;
-    }
-    if(!lstat(child, &st) && S_ISDIR(st.st_mode)) {
-      remove_tree(child);
-    } else {
-      unlink(child);
-    }
-  }
-  closedir(dir);
-  rmdir(path);
-}
-
-static void
 cleanup_staging(zipx_ctx_t *c) {
   if(c->staging_created) {
-    remove_tree(c->staging);
+    path_remove_tree(c->staging);
     c->staging_created = 0;
   }
 }
@@ -637,7 +608,16 @@ scan_archive(void *zip, zipx_ctx_t *c) {
     if(!is_dir && MZ_HOST_SYSTEM(info->version_madeby) == MZ_HOST_SYSTEM_UNIX) {
       mode_t mode = (mode_t)(info->external_fa >> 16);
 
-      if(mode && (mode & S_IFMT) != S_IFREG) {
+      /* ⚠️ 2026-10-10 —— 判据曾经是 `mode && (mode & S_IFMT) != S_IFREG`，
+       * 于是「只写了权限位、没写类型位」的条目被判成特殊文件（报
+       * "special file entry"）而整包拒绝。这不是理论问题：Python 的
+       * zipfile 给普通文件写的就是 0o600 << 16（类型位为 0），凡是这类
+       * 工具做出来的包一律进不来 —— 批量存档导入第一次真跑就撞上了。
+       *
+       * 只有**类型位**能证明"这是个特殊文件"：类型位为 0 只能说明"没声明
+       * 类型"，按普通文件处理（symlink / 设备节点 / fifo 一定带 S_IFMT，
+       * 上面 630 行与这里都会拦住 ⇒ 放宽不削弱安全性）。 */
+      if(mode && (mode & S_IFMT) && (mode & S_IFMT) != S_IFREG) {
         ret = ctx_fail(c, ZIPX_ERR_SPECIAL, name, "special file entry");
         break;
       }

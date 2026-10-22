@@ -41,6 +41,9 @@ typedef struct file_task {
   char dst[PATH_MAX];
   char current[PATH_MAX];
   char error[160];
+  /* Selected account (hex uid) for save backup/restore/delete. Empty = the save
+   * domain searches all /user/home accounts (legacy behaviour). */
+  char account[64];
   char error_code[64];
   char error_arg[PATH_MAX + 96];
   char **srcs;
@@ -63,6 +66,11 @@ typedef struct file_task {
   unsigned int eta_sample_next;
   unsigned int eta_sample_count;
   int cancel_requested;
+  /* PKG install only: hand the system installer a loopback stream uri
+   * (src/pkg_stream.c) instead of the file's own path. Opt-in — the stream
+   * route is not hardware-verified, so path delivery stays the default and
+   * this flag is how one install opts into the experiment. */
+  int pkg_stream;
   int reported; /* Terminal state has been included in /api/tasks. */
   unsigned int active_streams;
   time_t created_at;
@@ -82,7 +90,7 @@ extern unsigned short g_listen_port;
  * internal frames we cannot see. The payload's default pthread stack is small
  * (FreeBSD heritage), and an overflow does not return an error — the whole
  * process just vanishes, exactly the "clicked install, process gone" death.
- * See the NEXUS_SAVE_MAX_DEPTH note in nexus_port.c for the earlier encounter.
+ * See the MANGO_SAVE_MAX_DEPTH note in mango_port.c for the earlier encounter.
  * One explicit size for every task-executing thread. 2 MiB: the native
  * installer call chain (sceAppInstUtilInstallByPackage) has frames we cannot
  * see, and stack pages are committed on demand, so headroom is free. */
@@ -122,7 +130,7 @@ void task_set_total(file_task_t *task, unsigned long long total);
 void record_task_completion_locked(file_task_t *task, time_t completed_at);
 
 /* Unified request parameter reader: JSON body -> form body -> GET query, so a
- * handler accepts either the NEXUS front-end's apiJson (application/json) or
+ * handler accepts either the MANGO front-end's apiJson (application/json) or
  * apiPost (application/x-www-form-urlencoded) encoding. Returns a heap string
  * the caller must free, or NULL when the key is absent. */
 char *req_param(struct MHD_Connection *conn, const char *body, size_t body_size,
@@ -134,6 +142,9 @@ enum MHD_Result send_json_error(struct MHD_Connection *conn,
 enum MHD_Result send_json_error_detail(struct MHD_Connection *conn,
                                        unsigned int status, const char *msg,
                                        const char *code, const char *arg);
+/* ⚠️ Takes ownership of `data` (heap only -- strdup/malloc/strbuf .data).
+ * MHD frees it; the caller must not. Stack arrays and literals corrupt the
+ * heap instead of failing loudly; .build/chk_send_buffer.py guards this. */
 enum MHD_Result send_buffer(struct MHD_Connection *conn, unsigned int status,
                             char *data, const char *mime);
 
@@ -165,6 +176,11 @@ int count_task_path_bytes(file_task_t *task, const char *path,
 enum MHD_Result api_upload_prepare(struct MHD_Connection *conn,
                                    const char *body, size_t body_size);
 enum MHD_Result api_upload_finish(struct MHD_Connection *conn);
+/* GET/POST /api/upload/progress — 服务端视角的在飞上传字节计数。前端上传
+ * 进度条原本只信 XHR 的 upload.onprogress，PS5 WebKit 该事件稀疏（真机
+ * 2026-10-07 反馈「速度 1MB/s、进度条冻在 2%」），这里给一条不依赖浏览器
+ * 事件的真实口径。 */
+enum MHD_Result api_upload_progress(struct MHD_Connection *conn);
 enum MHD_Result api_download_prepare(struct MHD_Connection *conn,
                                      const char *body, size_t body_size);
 enum MHD_Result api_download(struct MHD_Connection *conn);
@@ -198,7 +214,7 @@ enum MHD_Result api_cancel(struct MHD_Connection *conn, const char *body,
                            size_t body_size);
 enum MHD_Result api_exit(struct MHD_Connection *conn, const char *body,
                          size_t body_size);
-/* NEXUS-only endpoints (ported in phase 2). Declared here so the dispatch table
+/* MANGO-only endpoints (ported in phase 2). Declared here so the dispatch table
  * compiles; real implementations replace the stubs in savemgr.c / pkg_lib.c. */
 enum MHD_Result api_app_register(struct MHD_Connection *conn,
                                  const char *body, size_t body_size);
@@ -208,8 +224,12 @@ enum MHD_Result api_fetch(struct MHD_Connection *conn, const char *body,
                           size_t body_size);
 enum MHD_Result api_nas_copy(struct MHD_Connection *conn, const char *body,
                              size_t body_size);
+enum MHD_Result api_nas_delete(struct MHD_Connection *conn, const char *body,
+                               size_t body_size);
 enum MHD_Result api_save_scan(struct MHD_Connection *conn, const char *body,
                               size_t body_size);
+enum MHD_Result api_save_users(struct MHD_Connection *conn, const char *body,
+                               size_t body_size);
 enum MHD_Result api_save_list(struct MHD_Connection *conn, const char *body,
                               size_t body_size);
 enum MHD_Result api_save_backup(struct MHD_Connection *conn, const char *body,
@@ -226,10 +246,22 @@ enum MHD_Result api_pkg_enqueue(struct MHD_Connection *conn, const char *body,
                                 size_t body_size);
 enum MHD_Result api_pkg_install_url(struct MHD_Connection *conn, const char *body,
                                     size_t body_size);
+/* Uninstall by TITLE_ID (never a path) — the 「卸载」 button on an 「已安装」
+ * card in PKG 管理. 500 + reason when the device call could not be made. */
+enum MHD_Result api_pkg_uninstall(struct MHD_Connection *conn, const char *body,
+                                  size_t body_size);
 enum MHD_Result api_install_poll(struct MHD_Connection *conn, const char *body,
                                  size_t body_size);
 
-/* Queue a single .pkg through the shared PKG worker (nexus_port.c uses this so
+/* Queue a single .pkg through the shared PKG worker (mango_port.c uses this so
  * /api/pkg/enqueue and /api/install-pkg share one queue). Returns 0 and sets
  * *out_id on success, PKG_INSTALL_UNSUPPORTED off-PS5, or -1 on error. */
 int filemgr_queue_pkg(const char *path, unsigned long *out_id);
+/* Same, but the package is delivered through the loopback stream route
+ * (/stream/install/, served by the main MHD daemon). Falls back to path
+ * delivery on its own when the stream cannot be published (unreadable file,
+ * no service port yet) — see pkg_stream_prepare(). */
+int filemgr_queue_pkg_stream(const char *path, unsigned long *out_id);
+/* smb:// / nfs:// / //host/share — a source the system installer can only be
+ * fed through our loopback stream, never by its own path. */
+int pkg_src_is_remote(const char *path);

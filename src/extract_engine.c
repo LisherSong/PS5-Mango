@@ -2,7 +2,7 @@
  * (zip_extract / rar_extract / sevenz_extract).
  *
  * This file exists so the worker never learns what a zipx_status_t is: the
- * worker depends on nexus_extract() and nothing else. When a fourth format is
+ * worker depends on mango_extract() and nothing else. When a fourth format is
  * added the change stops here.
  *
  * The dispatch rules are a straight port of the old MHD endpoint's
@@ -15,6 +15,7 @@
 #include "zipx_volume.h"
 #include "rar_extract.h"
 #include "sevenz_extract.h"
+#include "path_ops.h"   /* path_remove_tree(): no libmicrohttpd -I out here */
 
 #include <ctype.h>
 #include <dirent.h>
@@ -81,24 +82,24 @@ volume_format(const zipx_volume_t *vol) {
 
 /* --- status mapping ------------------------------------------------------- */
 
-static nexus_err_t
+static mango_err_t
 map_status(zipx_status_t s) {
   switch(s) {
-  case ZIPX_OK:              return NEXUS_OK;
-  case ZIPX_ERR_CANCELED:    return NEXUS_ERR_CANCELLED;
-  case ZIPX_ERR_PASSWORD:    return NEXUS_ERR_PASSWORD;
-  case ZIPX_ERR_CONFLICT:    return NEXUS_ERR_CONFLICT;
-  case ZIPX_ERR_UNSUPPORTED: return NEXUS_ERR_UNSUPPORTED;
+  case ZIPX_OK:              return MANGO_OK;
+  case ZIPX_ERR_CANCELED:    return MANGO_ERR_CANCELLED;
+  case ZIPX_ERR_PASSWORD:    return MANGO_ERR_PASSWORD;
+  case ZIPX_ERR_CONFLICT:    return MANGO_ERR_CONFLICT;
+  case ZIPX_ERR_UNSUPPORTED: return MANGO_ERR_UNSUPPORTED;
   case ZIPX_ERR_OPEN:
-  case ZIPX_ERR_FORMAT:      return NEXUS_ERR_NOTFOUND;
-  default:                   return NEXUS_ERR_GENERIC;
+  case ZIPX_ERR_FORMAT:      return MANGO_ERR_NOTFOUND;
+  default:                   return MANGO_ERR_GENERIC;
   }
 }
 
 /* --- engine glue --------------------------------------------------------- */
 
 typedef struct {
-  const nexus_extract_req_t *req;
+  const mango_extract_req_t *req;
 } glue_t;
 
 static int
@@ -117,7 +118,7 @@ glue_progress(void *userdata, const zipx_progress_t *p) {
 
 static zipx_status_t
 run_engine(int kind, const char *path, const char *dst,
-           const nexus_extract_req_t *req, zipx_result_t *res, glue_t *g) {
+           const mango_extract_req_t *req, zipx_result_t *res, glue_t *g) {
   const char *pw = (req->password && req->password[0]) ? req->password : NULL;
   zipx_conflict_t conflict = (zipx_conflict_t)req->conflict;
   const zipx_limits_t *limits =
@@ -139,7 +140,7 @@ run_engine(int kind, const char *path, const char *dst,
 }
 
 /* --- stale staging sweep ---------------------------------------------------
- * The engines stage into `.wfm-extract-<pid>-<stamp>-<n>` inside the
+ * The engines stage into `.nex-extract-<pid>-<stamp>-<n>` inside the
  * destination's PARENT and publish by renaming; they always clean the directory
  * up on the way out. A payload that is killed mid-extraction — a redeploy, a
  * console reboot, the process replaced by a newer build — leaves the directory
@@ -155,8 +156,8 @@ run_engine(int kind, const char *path, const char *dst,
  *
  * The engines each carry a private path_parent(); this file cannot see those,
  * hence the small local copy. */
-#define NEXUS_STAGING_PREFIX ".wfm-extract-"
-#define NEXUS_STAGING_TTL_SEC (60 * 60)
+#define MANGO_STAGING_PREFIX ".nex-extract-"
+#define MANGO_STAGING_TTL_SEC (60 * 60)
 
 static int
 split_parent(const char *path, char *out, size_t out_size) {
@@ -177,27 +178,6 @@ split_parent(const char *path, char *out, size_t out_size) {
 }
 
 static void
-remove_tree_quiet(const char *path) {
-  DIR *d = opendir(path);
-  struct dirent *e;
-
-  if(d) {
-    while((e = readdir(d))) {
-      char child[PATH_MAX];
-      struct stat st;
-
-      if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-      if((size_t)snprintf(child, sizeof(child), "%s/%s", path, e->d_name) >=
-         sizeof(child)) continue;
-      if(!lstat(child, &st) && S_ISDIR(st.st_mode)) remove_tree_quiet(child);
-      else unlink(child);
-    }
-    closedir(d);
-  }
-  rmdir(path);
-}
-
-static void
 sweep_stale_staging(const char *dst_dir) {
   char parent[PATH_MAX];
   DIR *d;
@@ -211,33 +191,33 @@ sweep_stale_staging(const char *dst_dir) {
     char full[PATH_MAX];
     struct stat st;
 
-    if(strncmp(e->d_name, NEXUS_STAGING_PREFIX,
-               strlen(NEXUS_STAGING_PREFIX))) continue;
+    if(strncmp(e->d_name, MANGO_STAGING_PREFIX,
+               strlen(MANGO_STAGING_PREFIX))) continue;
     if((size_t)snprintf(full, sizeof(full), "%s/%s", parent, e->d_name) >=
        sizeof(full)) continue;
     if(lstat(full, &st) || !S_ISDIR(st.st_mode)) continue;
-    if(now - st.st_mtime < NEXUS_STAGING_TTL_SEC) continue;
-    remove_tree_quiet(full);
+    if(now - st.st_mtime < MANGO_STAGING_TTL_SEC) continue;
+    path_remove_tree(full);
   }
   closedir(d);
 }
 
 /* --- entry point --------------------------------------------------------- */
 
-nexus_err_t
-nexus_extract(const char *archive_path, const char *dst_dir,
-              const nexus_extract_req_t *req,
-              nexus_extract_result_t *out) {
-  nexus_extract_req_t  none;
+mango_err_t
+mango_extract(const char *archive_path, const char *dst_dir,
+              const mango_extract_req_t *req,
+              mango_extract_result_t *out) {
+  mango_extract_req_t  none;
   zipx_result_t        res;
   zipx_volume_t        vol;
   zipx_status_t        st;
   char                *vol_err = NULL;
   glue_t               g;
   int                  vrc, kind;
-  nexus_err_t          e;
+  mango_err_t          e;
 
-  if(!archive_path || !dst_dir) return NEXUS_ERR_GENERIC;
+  if(!archive_path || !dst_dir) return MANGO_ERR_GENERIC;
   if(!req) {
     memset(&none, 0, sizeof(none));
     req = &none;
@@ -276,7 +256,7 @@ nexus_extract(const char *archive_path, const char *dst_dir,
        * set named x.rar.001 cannot be handed to it as-is.
        * NOTE: the old MHD endpoint refused EVERY rar volume set here. The
        * engine itself merges 'x.partNN.rar' correctly (tests/test_rar_extract.c
-       * asserts it against the real fixture), so Nexus only refuses the naming
+       * asserts it against the real fixture), so Mango only refuses the naming
        * the engine genuinely cannot open. */
       st = ZIPX_ERR_UNSUPPORTED;
       snprintf(res.message, sizeof(res.message),

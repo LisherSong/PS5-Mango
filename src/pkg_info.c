@@ -12,6 +12,7 @@
 #include "filemgr_internal.h"
 #include "json_util.h"
 #include "path_util.h"
+#include "transfer.h"
 #include "websrv.h"
 
 #define PKG_CNT_MAGIC 0x7f434e54u
@@ -38,7 +39,8 @@ typedef enum pkg_param_type {
 } pkg_param_type_t;
 
 typedef struct pkg_source {
-  int fd;
+  int fd;                 /* local file, -1 when served via src */
+  transfer_src_t *src;    /* NAS source (smb://... / nfs://...), NULL when local */
   uint64_t size;
   uint32_t content_type;
   uint32_t content_flags;
@@ -92,17 +94,29 @@ range_valid(uint64_t offset, uint64_t size, uint64_t file_size) {
 }
 
 static int
-read_at(int fd, void *buffer, size_t size, uint64_t offset) {
+pkg_read(pkg_source_t *pkg, void *buffer, size_t size, uint64_t offset) {
   unsigned char *p = buffer;
   size_t done = 0;
 
-  while(done < size) {
-    ssize_t n = pread(fd, p + done, size - done, (off_t)(offset + done));
-    if(n <= 0) {
-      if(n < 0 && errno == EINTR) continue;
-      return -1;
+  if(pkg->fd >= 0) {
+    while(done < size) {
+      ssize_t n = pread(pkg->fd, p + done, size - done, (off_t)(offset + done));
+      if(n <= 0) {
+        if(n < 0 && errno == EINTR) continue;
+        return -1;
+      }
+      done += (size_t)n;
     }
-    done += (size_t)n;
+    return 0;
+  }
+  /* NAS source: the transfer backends may return short reads, so loop to the
+   * exact extent — SFO/entry parsing below has no tolerance for holes. */
+  while(done < size) {
+    size_t got = 0;
+    if(transfer_read(pkg->src, offset + done, p + done, size - done, &got) != MANGO_OK ||
+       !got)
+      return -1;
+    done += got;
   }
   return 0;
 }
@@ -116,11 +130,11 @@ png_signature_valid(const unsigned char *data, size_t size) {
 }
 
 static int
-pkg_icon_is_png(const pkg_source_t *pkg, uint64_t offset, uint32_t size) {
+pkg_icon_is_png(pkg_source_t *pkg, uint64_t offset, uint32_t size) {
   unsigned char signature[8];
 
   return size >= sizeof(signature) &&
-         !read_at(pkg->fd, signature, sizeof(signature), offset) &&
+         !pkg_read(pkg, signature, sizeof(signature), offset) &&
          png_signature_valid(signature, sizeof(signature));
 }
 
@@ -128,10 +142,95 @@ static void
 pkg_source_close(pkg_source_t *pkg) {
   if(pkg->fd >= 0) close(pkg->fd);
   pkg->fd = -1;
+  if(pkg->src) { transfer_close(pkg->src); pkg->src = NULL; }
 }
 
+/* Compose "smb://user:pass@host:port/share/path" the same way the NAS copy
+ * API does: the port goes between host and path, not in front of the whole
+ * address. Returns 0 on success. */
 static int
-pkg_source_open(const char *path, pkg_source_t *pkg) {
+pkg_nas_compose_url(const char *scheme, const char *user, const char *pass,
+                    const char *port, const char *addr, char *out, size_t out_size) {
+  size_t hostlen = strcspn(addr, "/\\");
+  int n;
+
+  if(!hostlen) return -1;
+  n = snprintf(out, out_size, "%s://%s%s%s%s%.*s%s%s%s",
+               scheme,
+               (user && *user) ? user : "",
+               (user && *user) ? ":" : "",
+               (user && *user) ? (pass ? pass : "") : "",
+               (user && *user) ? "@" : "",
+               (int)hostlen, addr,
+               (port && *port) ? ":" : "",
+               (port && *port) ? port : "",
+               addr + hostlen);
+  if(n < 0 || (size_t)n >= out_size) return -1;
+  return 0;
+}
+
+/* Open a PKG either locally (`url` NULL) or from a NAS share. The NAS branch
+ * is why this exists: the old code stopped at open(), so every SMB package
+ * surfaced as "could not read package information" in the info panel. */
+static int
+pkg_source_open_nas(const char *path, const char *scheme, const char *user,
+                    const char *pass, const char *port, pkg_source_t *pkg) {
+  char url[MANGO_PATH_MAX];
+  uint64_t size = 0;
+
+  if(!scheme || !*scheme || !path || !*path) return -1;
+  if(!transfer_scheme_supported(scheme)) return -1;
+  if(pkg_nas_compose_url(scheme, user, pass, port, path,
+                         url, sizeof(url))) return -1;
+  pkg->src = transfer_open(scheme, url + strlen(scheme) + 3);
+  if(!pkg->src) return -1;
+  if(transfer_size(pkg->src, &size) != MANGO_OK || size <= PKG_HEADER_SIZE) {
+    transfer_close(pkg->src);
+    pkg->src = NULL;
+    return -1;
+  }
+  pkg->size = size;
+  return 0;
+}
+
+/* A fully composed NAS URL — `smb://user:pass@host:port/share/x.pkg` — carries
+ * everything the transfer layer needs, so it can be opened without a separate
+ * scheme/credential triple. This is what makes the install worker work: it
+ * only ever has the URL (that is what the queue holds), and before this it
+ * fell through to open() and failed, so every PKG on a share was submitted to
+ * the installer with an empty title id and an empty content id. */
+static int
+pkg_source_open_url(const char *url, pkg_source_t *pkg) {
+  const char *sep;
+  char        scheme[8];
+  size_t      n;
+  uint64_t    size = 0;
+
+  sep = strstr(url, "://");
+  if(!sep) return -1;
+  n = (size_t)(sep - url);
+  if(!n || n >= sizeof(scheme)) return -1;
+  memcpy(scheme, url, n);
+  scheme[n] = 0;
+  if(!transfer_scheme_supported(scheme)) return -1;
+  pkg->src = transfer_open(scheme, sep + 3);
+  if(!pkg->src) return -1;
+  if(transfer_size(pkg->src, &size) != MANGO_OK || size <= PKG_HEADER_SIZE) {
+    transfer_close(pkg->src);
+    pkg->src = NULL;
+    return -1;
+  }
+  pkg->size = size;
+  return 0;
+}
+
+/* `scheme` non-empty ⇒ the package lives on a NAS and `path` is the NAS-side
+ * address (host/share/path) with `user`/`pass`/`port` optional. A path that is
+ * ALREADY a composed `smb://`/`nfs://` URL is recognised on its own. The body of
+ * the parse is identical from here on: pkg_read() abstracts the source. */
+static int
+pkg_source_open_ex(const char *path, const char *scheme, const char *user,
+                   const char *pass, const char *port, pkg_source_t *pkg) {
   unsigned char header[PKG_HEADER_SIZE];
   unsigned char *table = NULL;
   struct stat st;
@@ -145,11 +244,20 @@ pkg_source_open(const char *path, pkg_source_t *pkg) {
 
   memset(pkg, 0, sizeof(*pkg));
   pkg->fd = -1;
-  if((pkg->fd = open(path, O_RDONLY)) < 0 || fstat(pkg->fd, &st) ||
+  if(scheme && *scheme) {
+    if(pkg_source_open_nas(path, scheme, user, pass, port, pkg)) goto done;
+  } else if(!strncmp(path, "smb://", 6) || !strncmp(path, "nfs://", 6)) {
+    /* The queue stores the composed URL, credentials included: open it
+     * directly instead of letting it reach open() and fail. */
+    if(pkg_source_open_url(path, pkg)) goto done;
+  } else if((pkg->fd = open(path, O_RDONLY)) < 0 || fstat(pkg->fd, &st) ||
      !S_ISREG(st.st_mode) || st.st_size < PKG_HEADER_SIZE ||
-     read_at(pkg->fd, header, sizeof(header), 0)) goto done;
+     pkg_read(pkg, header, sizeof(header), 0)) goto done;
 
-  pkg->size = (uint64_t)st.st_size;
+  if(pkg->fd >= 0) pkg->size = (uint64_t)st.st_size;
+  /* The local branch read the header inside its open condition; the NAS branch
+   * opened the source only, so read it here for both. */
+  if(pkg_read(pkg, header, sizeof(header), 0)) goto done;
   magic = read_be32(header);
   if(magic == PKG_FIH_MAGIC) {
     container_offset = read_le64(header + 0x58);
@@ -160,7 +268,7 @@ pkg_source_open(const char *path, pkg_source_t *pkg) {
   }
   if(container_offset) {
     if(!range_valid(container_offset, sizeof(header), pkg->size) ||
-       read_at(pkg->fd, header, sizeof(header), container_offset) ||
+       pkg_read(pkg, header, sizeof(header), container_offset) ||
        read_be32(header) != PKG_CNT_MAGIC) goto done;
   }
   container_size = pkg->size - container_offset;
@@ -175,7 +283,7 @@ pkg_source_open(const char *path, pkg_source_t *pkg) {
   table_size = (size_t)entry_count * PKG_ENTRY_SIZE;
   if(!range_valid(table_offset, table_size, container_size) ||
      !(table = malloc(table_size)) ||
-     read_at(pkg->fd, table, table_size, container_offset + table_offset)) {
+     pkg_read(pkg, table, table_size, container_offset + table_offset)) {
     goto done;
   }
 
@@ -217,6 +325,14 @@ done:
     pkg_source_close(pkg);
   }
   return ret;
+}
+
+/* Not local-only any more: the install worker hands it the composed NAS URL
+ * from the queue, and the URL branch in pkg_source_open_ex() is what lets a
+ * package on a share yield its title id and content id. */
+static int
+pkg_source_open(const char *path, pkg_source_t *pkg) {
+  return pkg_source_open_ex(path, NULL, NULL, NULL, NULL, pkg);
 }
 
 static int
@@ -542,11 +658,18 @@ sfo_lookup(const unsigned char *sfo, size_t size, const char *key,
 }
 
 /* Recover title id / title / version (and true container size) from the PKG's
- * embedded PARAM.SFO (PS4) or param.json (PS5). Returns 0 when a title id or
- * title was recovered, so the library can label the card. */
+ * embedded PARAM.SFO (PS4) or param.json (PS5), plus the container's own
+ * content id. Returns 0 when a title id or title was recovered, so the library
+ * can label the card.
+ *
+ * content_id comes from the container header, not from the params — it is what
+ * the system installer keys its download task on when the uri is an http URL,
+ * so an install submitted with an empty one is accepted (rc=0) and then fails
+ * in the background with nothing to attribute it to. */
 int
 pkg_info_read_meta(const char *path, char *title_id, size_t tid_sz,
                    char *title, size_t title_sz, char *version, size_t ver_sz,
+                   char *content_id, size_t cid_sz,
                    unsigned long long *total_size) {
   pkg_source_t pkg = {.fd = -1};
   unsigned char *param = NULL;
@@ -555,10 +678,14 @@ pkg_info_read_meta(const char *path, char *title_id, size_t tid_sz,
   if(title_id && tid_sz) title_id[0] = 0;
   if(title && title_sz) title[0] = 0;
   if(version && ver_sz) version[0] = 0;
+  if(content_id && cid_sz) content_id[0] = 0;
   if(!path || pkg_source_open(path, &pkg)) return -1;
   if(total_size) *total_size = pkg.size;
+  if(content_id && cid_sz && pkg.content_id[0])
+    copy_bounded(content_id, cid_sz, (const unsigned char *)pkg.content_id,
+                 strlen(pkg.content_id));
   if(!(param = malloc(pkg.param_size)) ||
-     read_at(pkg.fd, param, pkg.param_size, pkg.param_offset)) goto done;
+     pkg_read(&pkg, param, pkg.param_size, pkg.param_offset)) goto done;
 
   if(pkg.param_type == PKG_PARAM_SFO) {
     sfo_lookup(param, pkg.param_size, "TITLE_ID", title_id, tid_sz);
@@ -618,6 +745,25 @@ pkg_error(struct MHD_Connection *conn, const char *path) {
                                 "pkg_info_failed", path);
 }
 
+/* Open the package the info/icon API was asked about. A `scheme` in the body
+ * means the package lives on a NAS share and `path` is the NAS-side address
+ * (host/share/path); absent/empty means a local file. Returns 0 on success. */
+static int
+pkg_api_open(struct MHD_Connection *conn, const char *body, size_t body_size,
+             const char *path, pkg_source_t *pkg) {
+  char *scheme, *user = NULL, *pass = NULL, *port = NULL;
+  int ret;
+
+  scheme = req_param(conn, body, body_size, "scheme");
+  if(!scheme || !*scheme) { free(scheme); return pkg_source_open(path, pkg); }
+  user = req_param(conn, body, body_size, "user");
+  pass = req_param(conn, body, body_size, "pass");
+  port = req_param(conn, body, body_size, "port");
+  ret = pkg_source_open_ex(path, scheme, user, pass, port, pkg);
+  free(scheme); free(user); free(pass); free(port);
+  return ret;
+}
+
 enum MHD_Result
 api_pkg_info(struct MHD_Connection *conn, const char *body, size_t body_size) {
   char *path = fs_path_value(req_param(conn, body, body_size, "path"));
@@ -625,13 +771,13 @@ api_pkg_info(struct MHD_Connection *conn, const char *body, size_t body_size) {
   unsigned char *param;
   strbuf_t json = {0};
 
-  if(!path || pkg_source_open(path, &pkg)) {
+  if(!path || pkg_api_open(conn, body, body_size, path, &pkg)) {
     enum MHD_Result ret = pkg_error(conn, path);
     free(path);
     return ret;
   }
   if(!(param = malloc(pkg.param_size)) ||
-     read_at(pkg.fd, param, pkg.param_size, pkg.param_offset)) {
+     pkg_read(&pkg, param, pkg.param_size, pkg.param_offset)) {
     enum MHD_Result ret = pkg_error(conn, path);
     free(param);
     pkg_source_close(&pkg);
@@ -639,10 +785,27 @@ api_pkg_info(struct MHD_Connection *conn, const char *body, size_t body_size) {
     return ret;
   }
 
-  strbuf_printf(&json,
-                "{\"ok\":true,\"size\":%llu,\"content_id\":",
-                (unsigned long long)pkg.size);
-  json_escape(&json, pkg.content_id);
+  /* ★ title_id / title / version（2026-10-11 补）。
+     前端的信息面板（pkgInfoSpecRows / pkgInfoSub）本来就按**这三个字段**渲染
+     TITLE ID 与内容版本，而这个接口从来没返回过它们 —— 于是弹窗的「规格」页
+     永远缺两行最关键的身份信息（合并到用户报的「PKG 的信息显示不全」）。
+     字段名与 /api/pkg/scan 的卡片元数据保持一致：同源、同名字。 */
+  {
+    char tid[32] = "", ttl[256] = "", ver[48] = "";
+    (void)pkg_info_read_meta(path, tid, sizeof(tid), ttl, sizeof(ttl),
+                             ver, sizeof(ver), NULL, 0, NULL);
+
+    strbuf_printf(&json,
+                  "{\"ok\":true,\"size\":%llu,\"content_id\":",
+                  (unsigned long long)pkg.size);
+    json_escape(&json, pkg.content_id);
+    strbuf_printf(&json, ",\"title_id\":");
+    json_escape(&json, tid);
+    strbuf_printf(&json, ",\"title\":");
+    json_escape(&json, ttl);
+    strbuf_printf(&json, ",\"version\":");
+    json_escape(&json, ver);
+  }
   strbuf_printf(&json,
                 ",\"platform\":\"%s\",\"content_type\":%u,"
                 "\"content_flags\":%u,\"has_icon\":%s,\"fields\":",
@@ -677,10 +840,10 @@ api_pkg_icon(struct MHD_Connection *conn, const char *body, size_t body_size) {
   struct MHD_Response *response;
   enum MHD_Result ret;
 
-  if(!path || pkg_source_open(path, &pkg) || !pkg.icon_size ||
+  if(!path || pkg_api_open(conn, body, body_size, path, &pkg) || !pkg.icon_size ||
      !(icon = malloc(pkg.icon_size)) ||
-     read_at(pkg.fd, icon, pkg.icon_size, pkg.icon_offset)) {
-    if(path && pkg.fd >= 0) pkg_source_close(&pkg);
+     pkg_read(&pkg, icon, pkg.icon_size, pkg.icon_offset)) {
+    if(path && (pkg.fd >= 0 || pkg.src)) pkg_source_close(&pkg);
     free(path);
     return send_json_error(conn, MHD_HTTP_NOT_FOUND, "package icon not found");
   }

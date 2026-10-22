@@ -70,7 +70,7 @@ fd_has_unix_modes(int fd) {
  * Device-root presence.
  *
  * The PS5 pre-creates /mnt/ext1, /mnt/usb0 and /mnt/usb1 as ordinary empty
- * directories, so opendir() on one SUCCEEDS with nothing plugged in. The NEXUS
+ * directories, so opendir() on one SUCCEEDS with nothing plugged in. The MANGO
  * front-end decides whether to show a device shortcut purely from
  * "/api/fs/list returned ok" (probeRoots in assets/index.html), so an empty
  * mount point made the UI advertise a drive that is not attached — the exact

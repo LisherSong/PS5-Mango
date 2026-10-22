@@ -89,7 +89,7 @@ json_escape(strbuf_t *b, const char *s) {
       }
       /* >=0x80: the filesystem hands us UTF-8 (or GBK, which fails to decode).
          Decode the sequence to a code point and escape as \uXXXX (surrogate pairs
-         for the supplemental planes) so the NEXUS front-end's decodeFsText() and
+         for the supplemental planes) so the MANGO front-end's decodeFsText() and
          its JSON round-trip both see real characters. Never escape byte-wise:
          "ō" would become the fake pair U+00C5+U+008D, and U+008D has no glyph, so
          WebKit renders a question mark / tofu box. */

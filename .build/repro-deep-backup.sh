@@ -5,10 +5,10 @@
 #
 #   wsl.exe -d Ubuntu-22.04 bash .build/repro-deep-backup.sh
 set -u
-cd "$(wslpath 'C:\Users\songl\Desktop\Web File Manager\ps5-nexus')" || exit 9
+cd "$(wslpath 'C:\Users\songl\Desktop\Web File Manager\PS5-Mango')" || exit 9
 
 VER=$(sed -n 's/^VERSION_TAG[[:space:]]*:*=[[:space:]]*\([^[:space:]]*\).*/\1/p' Makefile | head -1)
-BIN="PS5-Nexus-linux-$VER"
+BIN="PS5-Mango-linux-$VER"
 [ -x "$BIN" ] || { echo "FAIL: $BIN missing (run make linux first)" >&2; exit 9; }
 
 R=/tmp/deep-repro

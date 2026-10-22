@@ -41,12 +41,13 @@
 #include "sevenz_header.h"
 #include "sevenz_mt.h"
 #include "sevenz_volstream.h"
+#include "path_ops.h"   /* path_remove_tree(): no libmicrohttpd -I out here */
 
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
 #endif
 
-#define SZX_STAGING_PREFIX ".wfm-extract-"
+#define SZX_STAGING_PREFIX ".nex-extract-"
 #define SZX_TMP_ATTEMPTS 64
 #define SZX_PUBLISH_MAX_DEPTH 128
 #define SZX_SPACE_SLACK_PER_ENTRY 512
@@ -518,39 +519,9 @@ szx_make_staging(szx_ctx_t *c, const char *parent) {
 }
 
 static void
-szx_remove_tree(const char *path) {
-  DIR *dir = opendir(path);
-  struct dirent *ent;
-
-  if(!dir) {
-    rmdir(path);
-    return;
-  }
-  while((ent = readdir(dir))) {
-    char child[ZIPX_PATH_MAX];
-    struct stat st;
-
-    if(!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) {
-      continue;
-    }
-    if(snprintf(child, sizeof(child), "%s/%s", path, ent->d_name) >=
-       (int)sizeof(child)) {
-      continue;
-    }
-    if(!lstat(child, &st) && S_ISDIR(st.st_mode)) {
-      szx_remove_tree(child);
-    } else {
-      unlink(child);
-    }
-  }
-  closedir(dir);
-  rmdir(path);
-}
-
-static void
 szx_cleanup_staging(szx_ctx_t *c) {
   if(c->staging_created) {
-    szx_remove_tree(c->staging);
+    path_remove_tree(c->staging);
     c->staging_created = 0;
   }
 }

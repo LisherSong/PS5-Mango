@@ -74,7 +74,7 @@ nas_list(struct MHD_Connection *conn, const char *scheme, const char *path,
   int count = 0;
   int first = 1;
   strbuf_t b = {0};
-  char url[NEXUS_PATH_MAX + 600];
+  char url[MANGO_PATH_MAX + 600];
   char why[384];
 
   if(!path || !*path) {
@@ -120,7 +120,7 @@ nas_list(struct MHD_Connection *conn, const char *scheme, const char *path,
       "nas_bad_address", NULL);
   }
 
-  if(transfer_list(s, path, &list, &count) != NEXUS_OK) {
+  if(transfer_list(s, path, &list, &count) != MANGO_OK) {
     const char *be = transfer_last_error(s);
     /* 0xc0000236 (CONNECTION_REFUSED) = 主机层就没有应答/拒绝：跟共享名、
        账号密码都无关，先查 SMB 服务和网络可达性 —— 不给提示用户只会
@@ -161,6 +161,43 @@ nas_list(struct MHD_Connection *conn, const char *scheme, const char *path,
   free(list);
   transfer_close(s);
   return send_buffer(conn, MHD_HTTP_OK, b.data, "application/json");
+}
+
+/* Recursive byte total for a directory, bounded so that listing a handful of
+ * deep folders cannot wedge the request on the console. Files count fully;
+ * directories are walked up to DIRSZ_MAX_ENTRIES entries / DIRSZ_MAX_DEPTH
+ * levels and then contribution is cut off (reported total is then an upper-ish
+ * floor, not exact). Symbolic links and non-regular files are skipped. */
+#define DIRSZ_MAX_ENTRIES 8192
+#define DIRSZ_MAX_DEPTH   8
+static long long
+dir_total_bytes(const char *path, int depth, long long *entries) {
+  DIR *d;
+  struct dirent *e;
+  struct stat st;
+  long long total = 0;
+
+  if(depth > DIRSZ_MAX_DEPTH || !entries || *entries >= DIRSZ_MAX_ENTRIES) {
+    return 0;
+  }
+  if(!(d = opendir(path))) {
+    return 0;
+  }
+  while((e = readdir(d))) {
+    char child[PATH_MAX];
+
+    if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+    if(++(*entries) >= DIRSZ_MAX_ENTRIES) break;
+    if(path_join(child, sizeof(child), path, e->d_name)) continue;
+    if(lstat(child, &st)) continue;
+    if(S_ISDIR(st.st_mode)) {
+      total += dir_total_bytes(child, depth + 1, entries);
+    } else if(S_ISREG(st.st_mode)) {
+      total += (long long)st.st_size;
+    }
+  }
+  closedir(d);
+  return total;
 }
 
 enum MHD_Result
@@ -227,11 +264,16 @@ api_list(struct MHD_Connection *conn, const char *body, size_t body_size) {
       strbuf_append(&b, ",");
     }
     first = 0;
+    /* Directories report their recursive byte total (bounded) so the UI can
+       show how big a folder really is, not the inode's stub size. */
+    long long esize = S_ISDIR(st.st_mode)
+      ? dir_total_bytes(child, 1, &(long long){0})
+      : (long long)st.st_size;
     strbuf_append(&b, "{\"name\":");
     json_escape(&b, entry->d_name);
     strbuf_printf(&b, ",\"is_dir\":%s,\"size\":%lld,\"mode\":%u,\"mtime\":%lld}",
                   S_ISDIR(st.st_mode) ? "true" : "false",
-                  (long long)st.st_size,
+                  esize,
                   (unsigned int)(st.st_mode & 07777),
                   (long long)st.st_mtime);
   }

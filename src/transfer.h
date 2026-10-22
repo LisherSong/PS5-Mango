@@ -4,10 +4,10 @@
  * same "readable stream + listable directory" interface. NAS browse / pull /
  * verify / atomic land / resume therefore reuse ONE code path.
  * New backends are added here only — no other module changes. */
-#include "nexus_common.h"
+#include "mango_common.h"
 
-#ifndef NEXUS_PATH_MAX
-#define NEXUS_PATH_MAX 1024
+#ifndef MANGO_PATH_MAX
+#define MANGO_PATH_MAX 1024
 #endif
 
 typedef struct transfer_src transfer_src_t; /* opaque backend */
@@ -32,7 +32,7 @@ typedef struct {
 typedef struct {
     char server[256];
     char share[256];
-    char path[NEXUS_PATH_MAX];
+    char path[MANGO_PATH_MAX];
     char user[128];
     char pass[128];
     int  port;   /* 0 = default for the scheme (445 SMB / 2049 NFS) */
@@ -72,9 +72,9 @@ int transfer_scheme_supported(const char *scheme);
  * Returns 1 on success, 0 on malformed input (empty server, "host:x" with a
  * non-numeric port). The trailing path may be empty (the share root). */
 int transfer_url_parse(const char *url, transfer_nas_t *out);
-nexus_err_t transfer_list(transfer_src_t *s, const char *dir,
+mango_err_t transfer_list(transfer_src_t *s, const char *dir,
                           transfer_entry_t **out, int *count);
-nexus_err_t transfer_read(transfer_src_t *s, uint64_t offset,
+mango_err_t transfer_read(transfer_src_t *s, uint64_t offset,
                           void *buf, size_t len, size_t *got);
 /* Recommended per-call read size for this source, so callers can size their
  * copy loop to the backend's negotiation instead of a safe-for-everyone guess.
@@ -92,7 +92,16 @@ nexus_err_t transfer_read(transfer_src_t *s, uint64_t offset,
 size_t transfer_read_chunk(transfer_src_t *s);
 /* Total stream size, so the UI can draw a determinate progress bar instead of
  * an indeterminate one. Only meaningful for a file-like source. */
-nexus_err_t transfer_size(transfer_src_t *s, uint64_t *size);
+mango_err_t transfer_size(transfer_src_t *s, uint64_t *size);
+/* Delete one entry on the source. `is_dir` selects rmdir vs unlink: the two are
+ * distinct calls on both SMB and NFS, and passing the wrong one is rejected by
+ * the server (STATUS_FILE_IS_A_DIRECTORY / NFSERR_ISDIR), so the caller must
+ * carry the type it already learned from transfer_list().
+ *
+ * Why this has to exist at all: the local POSIX unlink()/rmdir() silently do
+ * nothing to a "host/share/x" path (ENOENT), which reads to the user as
+ * "I clicked delete and the file is still there" with no error anywhere. */
+mango_err_t transfer_remove(transfer_src_t *s, const char *path, int is_dir);
 void transfer_close(transfer_src_t *s);
 /* Human-readable reason the last list/read/size failed (e.g. libsmb2's
  * "NT_STATUS_LOGON_FAILURE", libnfs's "mount refused"). NULL if none. The

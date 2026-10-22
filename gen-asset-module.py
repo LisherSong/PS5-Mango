@@ -26,6 +26,7 @@
 
 import argparse
 import gzip
+import os
 import re
 import string
 import mimetypes
@@ -57,6 +58,19 @@ MINIFY_MIMES = {
     'text/css',
     'application/javascript',
     'text/javascript',
+}
+
+# mimetypes ships no entry for the webfont formats -- on CPython 3.13
+# guess_type('a.woff2') returns (None, None). Without an override the generated
+# module would pass NULL as the Content-Type, and asset.c then sends the response
+# with no Content-Type header at all, leaving WebKit to sniff a binary blob.
+# It happens to guess right for woff2 ('wOF2' magic) but there is no reason to
+# depend on that, especially for a font the whole UI is typeset in.
+EXTRA_MIMES = {
+    '.woff2': 'font/woff2',
+    '.woff': 'font/woff',
+    '.ttf': 'font/ttf',
+    '.otf': 'font/otf',
 }
 
 
@@ -163,6 +177,8 @@ if __name__ == '__main__':
         args.path = args.FILE
 
     mime = mimetypes.guess_type(args.path)[0]
+    if mime is None:
+        mime = EXTRA_MIMES.get(os.path.splitext(args.path)[1].lower())
     encoding = None
     with open(args.FILE, mode='rb') as f:
         payload = f.read()

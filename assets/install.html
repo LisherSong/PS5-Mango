@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="/icon0.png">
-<title>PS5 Nexus — 启动</title>
+<title>PS5 Mango — 启动</title>
 <style>
 :root{
   --brand:#4d6bfe; --brand-text:#8fa9ff; --brand-soft:#131a33; --brand-line:rgba(77,107,254,.45);
@@ -17,7 +17,8 @@
 body{margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 50% -10%,#16203f 0%,var(--bg) 60%);color:var(--text);font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:grid;place-items:center;padding:24px}
 .wrap{width:min(640px,100%);background:var(--s2);border:1px solid var(--ghost-line);border-radius:var(--r-panel);padding:32px}
 .brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-.brand .mark{width:30px;height:30px;border-radius:var(--r-sm);background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:700}
+.brand .mark{width:30px;height:30px;border-radius:var(--r-sm);overflow:hidden}
+.brand .mark img{width:100%;height:100%;object-fit:cover}
 .brand b{font-size:18px;letter-spacing:.3px}
 .brand span{color:var(--muted);font-size:12px}
 h1{font-size:22px;margin:.2em 0 .4em}
@@ -33,8 +34,8 @@ code{background:var(--s3);padding:2px 6px;border-radius:6px;color:var(--brand-te
 </head>
 <body>
 <div class="wrap">
-  <div class="brand"><div class="mark">N</div><div><b>PS5 Nexus</b><br><span>NAS · 解压 · 吞吐续传 · 存档</span></div></div>
-  <h1>欢迎使用 PS5 Nexus</h1>
+  <div class="brand"><div class="mark"><img src="/icon0.png" alt=""></div><div><b>PS5 Mango</b><br><span>NAS · 解压 · 吞吐续传 · 存档</span></div></div>
+  <h1>欢迎使用 PS5 Mango</h1>
   <p>本机地址是你在 PS5 浏览器（或同网手机 / 电脑）打开管理界面的唯一入口。端口默认为 <code>2026</code>，运行时由服务端上报，可能顺延。</p>
   <div class="kv"><span class="dot"></span><div>HTTP 服务 · kstuff · SMB 三盏状态灯在界面顶栏呼吸显示</div></div>
   <a class="btn" href="index.html">进入管理界面 →</a>
