@@ -188,8 +188,12 @@ copy_tree(const char *src, const char *dst) { return copy_tree_r(src, dst, 0); }
  * an interrupted restore never shows up as a game title. */
 #define SAVE_PRERESTORE_SUFFIX ".nex-pre-restore"
 
-static void
-local_ip(char *out, size_t n) {
+/* 本机局域网 IP（UDP connect 窍门：不真发包，让内核选源地址）。
+ * 导出给 main.c 的开机通知用 —— 用户要在 PS5 屏幕上直接看到
+ * 「http://<ip>:<port>」而不是只有一个端口号（2026-10-23 用户要求）。
+ * 取不到时 out 为空串，调用方负责降级。 */
+void
+mango_local_ip(char *out, size_t n) {
   int fd;
   struct sockaddr_in a;
   socklen_t len = sizeof(a);
@@ -280,7 +284,7 @@ api_status(struct MHD_Connection *conn, const char *body, size_t body_size) {
   char ip[64];
 
   (void)body; (void)body_size;
-  local_ip(ip, sizeof(ip));
+  mango_local_ip(ip, sizeof(ip));
   strbuf_printf(&b, "{\"ok\":true,\"http\":true,\"port\":%u,\"addr\":", g_listen_port);
   json_escape(&b, ip);
   /* Report the version that is actually LIVE, so it can be read back from any

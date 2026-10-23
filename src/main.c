@@ -22,6 +22,7 @@
 #include "app_installer.h"
 #include "filemgr.h"
 #include "mango_log.h"
+#include "mango_port.h"
 #include "notify.h"
 #include "savemgr.h"
 #include "websrv.h"
@@ -442,7 +443,16 @@ main(int argc, char **argv) {
 #ifdef __SCE__
     mango_log("selected port %u", port);
     if(notified_port != port) {
-      notify_user("PS5 Mango %s\nPort: %u", VERSION_TAG, port);
+      /* 报完整 URL，不只有端口号（2026-10-23 用户要求）：IP 取不到时降级回
+         旧格式，别在通知里留一个 "http://:2026" 的破形状。 */
+      char ip[64];
+      mango_local_ip(ip, sizeof(ip));
+      if(ip[0]) {
+        mango_log("serving http://%s:%u", ip, port);
+        notify_user("PS5 Mango %s\nhttp://%s:%u", VERSION_TAG, ip, port);
+      } else {
+        notify_user("PS5 Mango %s\nPort: %u", VERSION_TAG, port);
+      }
       notified_port = port;
     }
 #endif

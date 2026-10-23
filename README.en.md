@@ -12,7 +12,7 @@ console, pull from and push to network shares, unpack archives, install
 packages, and back up / restore game saves — all from a browser on the same
 network (or from the PS5's own browser).
 
-**Version:** v1.0.31
+**Version:** v1.0
 
 The payload embeds its whole front-end (HTML/CSS/JS/graphics) and compresses it
 into the ELF, so deployment is one file and there is nothing to install
@@ -21,7 +21,7 @@ alongside it.
 > **Where the version is shown.** The payload manager (and etaHEN's
 > *plugins / payload ELFs* menu) lists payloads by **file name**, so the version
 > deliberately lives in the file name: the build output is
-> `PS5-Mango-v1.0.31.elf`. Bumping `VERSION_TAG` in the Makefile renames the
+> `PS5-Mango-v1.0.elf`. Bumping `VERSION_TAG` in the Makefile renames the
 > artifact, which is the only thing the console can display.
 > The payload also reports its version in the startup notification, on stdout,
 > and over `/api/status`.
@@ -142,7 +142,7 @@ Requires the [PS5 payload SDK](https://github.com/ps5-payload-dev/sdk#quick-star
 
 ```sh
 export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
-make                 # -> PS5-Mango-v1.0.31.elf
+make                 # -> PS5-Mango-v1.0.elf
 ```
 
 `libmicrohttpd` is linked from the SDK. `make` checks for it and runs
@@ -154,8 +154,8 @@ For local UI work on Linux — same code, no PS5 kernel calls, includes the
 `/icon0.png` favicon:
 
 ```sh
-make linux           # -> PS5-Mango-linux-v1.0.31
-./PS5-Mango-linux-v1.0.31
+make linux           # -> PS5-Mango-linux-v1.0
+./PS5-Mango-linux-v1.0
 ```
 
 `make NAS=0` drops the vendored SMB/NFS backends and their libraries.
@@ -173,7 +173,7 @@ Send the built ELF to an ELF loader on the console (the usual listener is
 
 ```sh
 export PS5_HOST=ps5_ip_address
-nc -q0 "$PS5_HOST" 9021 < PS5-Mango-v1.0.31.elf
+nc -q0 "$PS5_HOST" 9021 < PS5-Mango-v1.0.elf
 ```
 
 The console shows a notification with the version and the actual listen port.

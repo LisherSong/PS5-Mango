@@ -2,7 +2,7 @@
 
 > ⚠️ **本文档描述的是 `ps5-mango` 那棵树（"重写"路线的执行计划），不是本仓库。**
 > 本仓库以 **owendswang/ps5-web-file-manager 最新版后端**为底座，搬入 MANGO 的前端 UI
-> 与 PKG / 存档能力，产物 `PS5-Mango-v1.0.0.elf`，端口 `2026`。
+> 与 PKG / 存档能力，产物 `PS5-Mango-v1.0.elf`，端口 `2026`。
 > 本文里的**模块划分、文件路径、ELF 名都不适用于本仓**；引用到的
 > `../ps5-nas-rewrite-proposal.html`、`../ps5-ui-demo-*.html` 也不在本仓内（它们是仓库外的设计稿）。
 > **本仓的现状看 `README.md` 与 `REAL-CONSOLE-CHECKLIST.md`。**

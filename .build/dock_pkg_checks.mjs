@@ -41,6 +41,12 @@ console.log("【1】renderJob 尊重 delScrimExempt（存档删除不弹删除�
       fmtCount: n => String(n), decodeFsText: s => s, tailPath: s => s,
       fmtSpeed: () => "—", fmtDur: () => "0:00", taskElapsedMs: () => 0,
       fsClearSel() {}, fsView: null, toast() {},
+      /* i18n（2026-10-23 补桩）：renderJob 内部调 t("js03xx", "中文默认值")，
+         vm 里没有语言包 —— 按真实 t() 语义回退第二个参数（中文）。
+         缺这个桩整段抛 ReferenceError: t is not defined，正是本脚本
+         「补入时已坏掉」的最后一处。 */
+      t: (k, zh) => zh,
+      showCenterResult() {},   // 终态居中提示：当前用例走不到，桩补全防回归
       setInterval: () => 0, clearInterval() {},
     };
     vm.createContext(ctx);
@@ -88,6 +94,10 @@ console.log("【2】ppCleanupWhenDone：装完自动删暂存（跳过/失败保
         return { ok: true };
       },
       toast: m => calls.push({ url: "@toast", body: m }),
+      /* i18n（2026-10-23 补桩）：ppCleanupWhenDone 的 toast 文案走 t()，
+         没有语言包时按真实语义回退中文默认值（断言里的 /跳过/、/已清理/
+         匹配的正是这些默认值）。 */
+      t: (k, zh) => zh,
       /* 后台清理用：真机源码在删成功时调它把任务从删除坞里撤掉。
          这里只需要存在（不关心副作用），缺了会 ReferenceError 整段崩掉。 */
       delTrackQuiet: () => {},
@@ -190,6 +200,8 @@ let section4Done = false;
       pcCatalog: [],
       libCard: p => `<card path="${p.path}">`,
       esc: s => s,
+      /* i18n（2026-10-23 补桩）：renderLibraryInner 的空态/计数文案走 t() */
+      t: (k, zh) => zh,
     };
     vm.createContext(ctx);
     vm.runInContext(mutate ? mutate(code) : code, ctx);
@@ -272,7 +284,8 @@ let section4Done = false;
     ok(cards(f.box) === 1 && /\/user\/app\/PPSA23226/.test(f.box.innerHTML),
        "只有安装目录卡（SMB 装好的游戏）⇒ 照常出现");
 
-    /* 反证：跨种类判定被摘掉 ⇒ 双卡立刻回来（断言能红） */
+    /* 反证：跨种类判定被摘掉 ⇒ 双卡立刻回来（断言能红）。
+       ⚠️ 锚点 2026-10-23 对齐：局部变量 t → tid（防遮蔽全局 t() 的改名 sweep）。 */
     const g = mk({
       "/data/pkg": { ok: true, packages: [
         { title_id: "CUSA45599", path: "/data/pkg/dave.pkg", installed: true }],
@@ -280,7 +293,7 @@ let section4Done = false;
       "/user/app": { ok: true, packages: [
         { title_id: "CUSA45599", path: "/user/app/CUSA45599", app_dir: true }],
         unreadable: [] },
-    }, code => code.replace("pkgTid.has(t) || seenTid.has(t)", "seenTid.has(t)"));
+    }, code => code.replace("pkgTid.has(tid) || seenTid.has(tid)", "seenTid.has(tid)"));
     g.run();
     await new Promise(r => setImmediate(r));
     ok(cards(g.box) === 2,
@@ -296,8 +309,11 @@ console.log("【5】安装失败提示的可读性（toast 时长、6 秒失败�
   ok(/function toast\(msg, ms\)/.test(src) &&
      /Number\(ms\) > 0 \? Number\(ms\) : 2400/.test(src),
      "toast(msg, ms)：失败类提示可指定更长的阅读时间（默认仍 2400ms）");
-  ok(/toast\(verb \+ "失败：" \+ \(t\.note \|\| nm\), 6000\)/.test(src),
+  ok(/toast\(verb \+ t\("js0002", "失败："\) \+ \(task\.note \|\| nm\), 6000\)/.test(src),
      "pollInstall 失败分支：带服务端原话 + 6000ms");
+  /* ⚠️ 锚点 2026-10-23 对齐：i18n 包裹把 "失败：" 变成 t("js0002", "失败：")，
+     局部变量 t 改名 sweep 把 watchTask(id, t => 变成 task => —— 两轮改动都让
+     旧锚点失配，断言意图（服务端原话 + 6 秒）不变。 */
   /* 反证：时长参数被摘掉 ⇒ 正向标记消失 */
   ok((() => {
     const bad = src.replace(/function toast\(msg, ms\)/, "function toast(msg)");
@@ -326,6 +342,8 @@ console.log("【6】版本牌：applyStatus 消费 /api/status 的 version 字�
         getElementById: id => els[id] || null,
         querySelector: () => null,
       },
+      /* i18n（2026-10-23 补桩）：applyStatus 的版本牌 title 走 t() */
+      t: (k, zh) => zh,
     };
     vm.createContext(ctx);
     vm.runInContext(mutate ? mutate(code) : code, ctx);

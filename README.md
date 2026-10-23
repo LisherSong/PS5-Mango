@@ -9,11 +9,11 @@
 
 一个为越狱 PS5 打造的**一体化 Web 控制面板**：在浏览器里管理主机文件、从网络共享拉取/推送文件、解压归档、安装包体，以及备份/还原游戏存档——全部可在同一局域网下的任意设备（或 PS5 自带浏览器）上完成。
 
-**版本：** v1.0.31
+**版本：** v1.0
 
 该 payload 把整套前端（HTML/CSS/JS/图形）内嵌进 ELF 并压缩，因此部署只是一个文件，无需额外安装任何东西。
 
-> **版本在哪里显示。** 启动器（以及 etaHEN 的 *plugins / payload ELFs* 菜单）按**文件名**列出 payload，所以版本号刻意放在文件名里：构建产物为 `PS5-Mango-v1.0.31.elf`。在 Makefile 里改动 `VERSION_TAG` 会重命名产物——这也是主机上唯一能显示的版本标识。payload 还会在启动通知、stdout 以及 `/api/status` 接口中上报版本。
+> **版本在哪里显示。** 启动器（以及 etaHEN 的 *plugins / payload ELFs* 菜单）按**文件名**列出 payload，所以版本号刻意放在文件名里：构建产物为 `PS5-Mango-v1.0.elf`。在 Makefile 里改动 `VERSION_TAG` 会重命名产物——这也是主机上唯一能显示的版本标识。payload 还会在启动通知、stdout 以及 `/api/status` 接口中上报版本。
 
 ## 截图
 
@@ -81,7 +81,7 @@
 
 ```sh
 export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
-make                 # -> PS5-Mango-v1.0.31.elf
+make                 # -> PS5-Mango-v1.0.elf
 ```
 
 `libmicrohttpd` 从 SDK 链接。`make` 会检查它，缺失时运行 `install-libmicrohttpd.sh`；若主机无网络，可指向你自己下载的 tarball
@@ -90,8 +90,8 @@ make                 # -> PS5-Mango-v1.0.31.elf
 在 Linux 上做本地 UI 开发——同一套代码，无 PS5 内核调用，含 `/icon0.png` favicon：
 
 ```sh
-make linux           # -> PS5-Mango-linux-v1.0.31
-./PS5-Mango-linux-v1.0.31
+make linux           # -> PS5-Mango-linux-v1.0
+./PS5-Mango-linux-v1.0
 ```
 
 `make NAS=0` 会剔除内置的 SMB/NFS 后端及其库。
@@ -104,7 +104,7 @@ make linux           # -> PS5-Mango-linux-v1.0.31
 
 ```sh
 export PS5_HOST=ps5_ip_address
-nc -q0 "$PS5_HOST" 9021 < PS5-Mango-v1.0.31.elf
+nc -q0 "$PS5_HOST" 9021 < PS5-Mango-v1.0.elf
 ```
 
 主机会弹出带版本号与实际监听端口的通知。然后，从局域网内任意设备打开：

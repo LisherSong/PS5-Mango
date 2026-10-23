@@ -26,7 +26,7 @@ endif
 # hosttest "api/status reports the Makefile's VERSION_TAG" check caught it).
 # The VSTAMP prerequisite on the src/ object rules below forces those objects
 # to recompile on every version change.
-VERSION_TAG := v1.0.31
+VERSION_TAG := v1.0
 # ⚠️ TITLE_ID MUST match "titleId" in assets/param.json. app_installer.c uses
 # TITLE_ID to create /user/app/<id>, but the PS5 launcher reads the title id out
 # of the param.json we drop beside it; if they disagree the app is installed

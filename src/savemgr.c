@@ -15,6 +15,7 @@
 
 #include <dlfcn.h>
 #include <pthread.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6309,8 +6310,23 @@ dispatch_save_mgr(struct MHD_Connection *conn, const char *url,
   enum MHD_Result r;
 
   if (soft) {
-    if (pthread_mutex_trylock(&g_savemgr_lock) != 0)
+    /* ★ 封面路由单独对待：有界等待，不是瞬死 trylock（2026-10-23 真机诊断
+       docs/diagnosis-2026-10-22 §3.2 的修法 2）。
+       开页一瞬间 5 张封面 + 存档页 games 全目录扫描互相抢锁，trylock 抢不到
+       的那几张直接 503；前端旧行为是 onerror 即 remove、无重试 ⇒ 这两张卡
+       的封面在整个页面生命周期里消失（PPSA05143 / CUSA20499 就是这么没的）。
+       封面只读一个几十 KB 的 png，值得等：2s 足够任何一次 games 扫描放锁；
+       真赶上分钟级批量导入时 2s 后照样回 503 busy，前端有退避重试兜底，
+       行为相比旧版只赢不输。 */
+    if (!strcmp(url, "/api/save_mgr/icon")) {
+      struct timespec ts;
+      clock_gettime(CLOCK_REALTIME, &ts);
+      ts.tv_sec += 2;
+      if (pthread_mutex_timedlock(&g_savemgr_lock, &ts) != 0)
+        return send_json_error(conn, MHD_HTTP_SERVICE_UNAVAILABLE, "busy");
+    } else if (pthread_mutex_trylock(&g_savemgr_lock) != 0) {
       return send_json_error(conn, MHD_HTTP_SERVICE_UNAVAILABLE, "busy");
+    }
   } else if (!log_only) {
     pthread_mutex_lock(&g_savemgr_lock);
   }
