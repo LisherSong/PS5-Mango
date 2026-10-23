@@ -24,8 +24,8 @@ typedef struct {
  * or nfs export name (verbatim from the URL), path is the remainder relative
  * to that share/export root. user/pass are the optional credentials from a
  * "user:pass@host" prefix (empty strings = anonymous).
- * server_only is set when the address carried NO share at all ("192.168.1.3"
- * or "192.168.1.3/"). That is legal for SMB — the backend then connects to
+ * server_only is set when the address carried NO share at all ("192.168.1.100"
+ * or "192.168.1.100/"). That is legal for SMB — the backend then connects to
  * IPC$ and lists the share names as directory entries, which is what a user
  * who only knows the NAS's IP actually needs. NFS has no equivalent (an export
  * is mandatory), so it will fail at mount time with a real reason. */

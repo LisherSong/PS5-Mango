@@ -27,7 +27,7 @@
 | # | 症状 | 根因 | 修法 |
 |---|------|------|------|
 | 1 | 列表一页显示不下时，往下滑上面的功能按钮就没了 | 面包屑 + `.fmbar` 就是普通文档流元素，没有任何东西钉住它们 | 包进 `.fmstick`（`position:sticky`）；`top` 由 JS 实测顶栏高度写进 `--topH`（顶栏 1920 下 70px、900 下换行成 123px，**不是常数**），配 `ResizeObserver` |
-| 2 | NAS 设置成 `192.168.1.3\PS5_Games` 后报 `Invalid address: ... Can not resolve into IPv4/v6` | 主机名扫描只认 `/` 和 `:`，整串 `192.168.1.3\PS5_Games` 被当成主机名丢给 `getaddrinfo` | 四层都按「`\` 等同 `/`」修：`transfer.c`（`path_sep()`）、`list.c`（`nas_build_url`）、`mango_port.c`（`/api/fetch` 取 basename）、前端 `normalizeNasAddr()`。**口令里的 `\` 故意不转换**（转了就悄悄改了密码）。前端**读取时也归一**，因为已经踩坑的机器 localStorage 里存的就是坏地址 |
+| 2 | NAS 设置成 `192.168.1.100\PS5_Games` 后报 `Invalid address: ... Can not resolve into IPv4/v6` | 主机名扫描只认 `/` 和 `:`，整串 `192.168.1.100\PS5_Games` 被当成主机名丢给 `getaddrinfo` | 四层都按「`\` 等同 `/`」修：`transfer.c`（`path_sep()`）、`list.c`（`nas_build_url`）、`mango_port.c`（`/api/fetch` 取 basename）、前端 `normalizeNasAddr()`。**口令里的 `\` 故意不转换**（转了就悄悄改了密码）。前端**读取时也归一**，因为已经踩坑的机器 localStorage 里存的就是坏地址 |
 
 ### 更早一轮：接缝层的 5 个 bug
 
@@ -136,7 +136,7 @@ bash .build/cf-2026-1011-pkg.sh                             # 反证：四件事
 bash .build/nas-fixture.sh                                  # 可选：起 1500 上的 smbd，解锁 NAS 端到端那一段
 
 # WSL 内手动
-cd "/mnt/c/Users/songl/Desktop/Web File Manager/ps5-nexus"
+cd "/mnt/c/Users/<user>/Desktop/Web File Manager/ps5-nexus"
 make linux && python3 hosttest.py
 make all                                                     # 需要 PS5_PAYLOAD_SDK
 ```

@@ -1577,7 +1577,7 @@ validate_task_target(const char *src, const char *target, int overwrite,
     return -1;
   }
   if(lstat(src, &src_st)) {
-    /* NAS 上的文件走到这里是必然的：本机根本不认识 "192.168.1.3/PS5_Games/x"
+    /* NAS 上的文件走到这里是必然的：本机根本不认识 "192.168.1.100/PS5_Games/x"
        这种路径。原来一律回 "source not found"，用户对着一个明明看得见的文件
        被告知「源不存在」—— 真正的原因（远程源要走 NAS 拉取）一个字都没说。
        判据用「不以 '/' 开头」：本地路径在本进程里恒是绝对路径。 */
@@ -2048,8 +2048,8 @@ create_task_response(struct MHD_Connection *conn, task_op_t op,
   }
   if(dst) {
     /* 目标必须是一个**本地绝对路径**。用户从 NAS 视图点「粘贴」时 dst 是
-       "192.168.1.3/PS5_Games" 这种相对形状 —— 不挡的话 path_join 会照着写，
-       于是在进程当前目录下真的建出一棵 "192.168.1.3/PS5_Games" 目录树：
+       "192.168.1.100/PS5_Games" 这种相对形状 —— 不挡的话 path_join 会照着写，
+       于是在进程当前目录下真的建出一棵 "192.168.1.100/PS5_Games" 目录树：
        既不是用户要的（他要传到 NAS），又污染了本地磁盘，而且任务还报成功。
        transfer 层只读（没有写接口），所以这个方向此刻只能明确拒绝。 */
     if(dst[0] != '/') {

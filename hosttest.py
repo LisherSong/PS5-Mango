@@ -2033,7 +2033,7 @@ def main():
               st == 400 and j and not j.get("ok")
               and j.get("error_code") == "nas_bad_address"
               and "共享名" in (j or {}).get("error", ""), "st=%s j=%s" % (st, j))
-        st, j = c.api_json("/api/fs/list", {"scheme": "smb", "path": "\\192.168.1.3\\"})
+        st, j = c.api_json("/api/fs/list", {"scheme": "smb", "path": "\\192.168.1.100\\"})
         check("SMB share-less UNC form also rejected as nas_bad_address",
               st == 400 and j and not j.get("ok")
               and j.get("error_code") == "nas_bad_address", "st=%s j=%s" % (st, j))
@@ -2047,8 +2047,8 @@ def main():
 
         # ---- 15g-bis. 反斜杠是路径分隔符，不是主机名的一部分 ----
         # 用户实测（2026-10-01）：地址栏填 Windows 形状的
-        # "192.168.1.3\PS5_Games" ⇒
-        #   NAS 连接失败：Invalid address:192.168.1.3\PS5_Games
+        # "192.168.1.100\PS5_Games" ⇒
+        #   NAS 连接失败：Invalid address:192.168.1.100\PS5_Games
         #                 Can not resolve into IPv4/v6.
         # 即整串（含反斜杠）被当成主机名交给了 getaddrinfo。
         #
@@ -2056,7 +2056,7 @@ def main():
         # 到了后端才失败 ⇒ nas_list_failed。修复前是后者**且消息里带
         # "Invalid address" / "Can not resolve"**；修复后仍然是后者，
         # 但主机名已经干净（127.0.0.1 秒拒，不走 DNS，所以断言离线且快）。
-        # 故意不打 192.168.1.3：真去连一个不存在的内网地址会挂到超时。
+        # 故意不打 192.168.1.100：真去连一个不存在的内网地址会挂到超时。
         for label, naspath in (
             ("host\\share", "127.0.0.1\\PS5_Games"),
             ("UNC \\\\host\\share", "\\\\127.0.0.1\\PS5_Games"),
@@ -2078,11 +2078,11 @@ def main():
 
         # ---- 15g-ter. NAS 源不能走 /api/copy（远程源要走 transfer 层） ----
         # 用户实测③：「把 NAS 中的文件复制到 PS5 中时会提示复制失败：source not
-        # found」。/api/copy 的第一个动作就是 lstat(src)，而 "192.168.1.3/PS5_Games/x"
+        # found」。/api/copy 的第一个动作就是 lstat(src)，而 "192.168.1.100/PS5_Games/x"
         # 在本机根本不存在 ⇒ 必然 source not found。修法是两半：
         #   ① 这一形状的源给出**可操作**的文案（指明该用哪个按钮）；
         #   ② 新增 /api/nas/copy 真正走 transfer 层（断言见下）。
-        st, j = c.api_json("/api/copy", {"paths": "192.168.1.3/PS5_Games/x.bin",
+        st, j = c.api_json("/api/copy", {"paths": "192.168.1.100/PS5_Games/x.bin",
                                          "dst": ROOT, "overwrite": "0"})
         check("copy with a NAS-shaped source names the right action",
               j and not j.get("ok") and "复制到本机" in (j.get("error") or ""),
@@ -2098,7 +2098,7 @@ def main():
 
         # ---- 15g-quater. 反方向（本地 → NAS）必须**同步**拒绝 ----
         # transfer 层**只有读接口**（没有写接口），所以「传到 NAS」此刻做不到。
-        # 不挡的话 /api/copy 会照 "192.168.1.3/PS5_Games" 这个相对形状一路走下去：
+        # 不挡的话 /api/copy 会照 "192.168.1.100/PS5_Games" 这个相对形状一路走下去：
         # 目标路径被当成相对路径接受，任务**入队成功**（前端于是显示"已开始"），
         # 然后才在空间检查那一步失败 —— 用户拿到的是一个「看起来跑起来了、
         # 结果莫名其妙失败」的任务，而不是一句「这个方向做不到」。
@@ -2109,7 +2109,7 @@ def main():
         #    （本项目反复踩的就是这种「看起来在测、其实什么都没测」）。
         #    dst 用一个**目录**源也不行，试过了：空间检查挡在写之前。
         st, j = c.api_json("/api/copy", {"paths": ROOT + "/folder",
-                                         "dst": "192.168.1.3/PS5_Games",
+                                         "dst": "192.168.1.100/PS5_Games",
                                          "overwrite": "0"})
         check("copy to a NAS-shaped destination is refused synchronously",
               st == 400 and j and not j.get("ok")
@@ -2120,7 +2120,7 @@ def main():
         # ---- 15g-quinquies. /api/nas/copy 的那几道门 ----
         st, j = c.api_json("/api/nas/copy", {"scheme": "smb",
                                              "paths": "127.0.0.1/games/readme.txt",
-                                             "dst": "192.168.1.3/PS5_Games"})
+                                             "dst": "192.168.1.100/PS5_Games"})
         check("nas/copy refuses a remote destination (bad_target)",
               st == 400 and j and not j.get("ok")
               and j.get("error_code") == "bad_target", "st=%s j=%s" % (st, j))

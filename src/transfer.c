@@ -326,10 +326,10 @@ transfer_scheme_supported(const char *scheme) {
 /* '/' and '\' are interchangeable as path separators here.
  *
  * Windows users both type and paste backslash-separated SMB paths, and the NAS
- * address field is exactly where that lands: "192.168.1.3\PS5_Games". Before
+ * address field is exactly where that lands: "192.168.1.100\PS5_Games". Before
  * this the server-name scan ran straight past the backslash to end-of-string,
  * so the whole thing went to getaddrinfo, which answered
- *   Invalid address:192.168.1.3\PS5_Games Can not resolve into IPv4/v6.
+ *   Invalid address:192.168.1.100\PS5_Games Can not resolve into IPv4/v6.
  * -- an error naming neither the offending character nor the field at fault.
  *
  * ⚠️ Credentials are peeled off BEFORE any of this and are deliberately NOT

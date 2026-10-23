@@ -4720,7 +4720,7 @@ document.getElementById("btnClearClip").addEventListener("click", () => {
  *   NAS → NAS    ⇒ 同上。
  * 🪤 以前一律走 /api/copy，而那条路的第一个动作是 lstat(src) —— NAS 路径在本机
  * 根本不存在，于是用户对着一个看得见的文件被告知 "source not found"。
- * 更糟的是反方向：dst 是 "192.168.1.3/PS5_Games"（相对形状），不挡的话服务端会
+ * 更糟的是反方向：dst 是 "192.168.1.100/PS5_Games"（相对形状），不挡的话服务端会
  * 真的在当前目录下建出这棵树，任务还报成功。 */
 document.getElementById("btnPaste").addEventListener("click", async () => {
   if (!FS_CLIPBOARD || !FS_CLIPBOARD.items.length) return;
@@ -5116,11 +5116,11 @@ function fsViewRow(e) {
    要换掉的三样东西：
      1. `\` → `/`：Windows 习惯，也含资源管理器「复制路径」给出的
         \\主机\共享。反斜杠不是后端的地址分隔符，整串会被当成主机名交给
-        getaddrinfo，报 "Invalid address:192.168.1.3\PS5_Games Can not resolve
+        getaddrinfo，报 "Invalid address:192.168.1.100\PS5_Games Can not resolve
         into IPv4/v6" —— 既没说是哪个字符错，也没说是哪个输入框错。
      2. 手滑粘上的 `smb://` / `nfs://` 前缀（协议由上面的分段控件决定）。
      3. 重复分隔符与前导分隔符（`//host//share`、`/host/share`、`\\host\share`）。
-   ⚠️ 顺序不能换：先换反斜杠再剥前导 —— 反过来 `\192.168.1.3\…` 的首字符不是
+   ⚠️ 顺序不能换：先换反斜杠再剥前导 —— 反过来 `\192.168.1.100\…` 的首字符不是
    `/`，剥不掉，于是又变成一句「地址无法解析」。
    ⚠️ 后端 transfer_url_parse 现在也认反斜杠（双保险）：这里做是为了让**用户看到
    自己填的东西被纠正了**（保存后 toast 显示的是归一化结果），而不是默默替他猜。 */
