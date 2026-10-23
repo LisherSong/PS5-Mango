@@ -1,11 +1,11 @@
-Third-party components in PS5 Nexus
+Third-party components in PS5 Mango
 ===================================
 
 This project is GPL-3.0-or-later (see LICENSE). It builds on, and in some cases
 redistributes, the following third-party work. Nothing here is claimed as
 original, and no licence is re-granted.
 
-PS5 Nexus is derived from owendswang/ps5-web-file-manager
+PS5 Mango is derived from owendswang/ps5-web-file-manager
 ---------------------------------------------------------
 The back end (src/) descends from that project, which is distributed under the
 GNU General Public License v3.0. That is why this project is GPL-3.0-or-later.
@@ -41,6 +41,42 @@ libnfs — NFSv3/v4 client
              examples/ tree is NOT vendored, so no GPL-3-only code is pulled in
              beyond what this project already carries as a whole.
 
+zlib — DEFLATE compression
+  Vendored:  third_party/zlib/{include,src}
+  Licence:   Zlib
+  Texts:     third_party/zlib/include/zlib.h (header notice)
+  Upstream:  https://zlib.net/
+  Note:      Provided under the Zlib licence (see the notice in
+             zlib.h). Permissive; imposes no condition beyond
+             attribution.
+
+minizip-ng — zip / zipx extraction with crypto backends
+  Vendored:  third_party/minizip-ng/{include,src}
+  Licence:   Zlib (its LICENCE states "condition of use and
+             distribution are the same as zlib")
+  Texts:     third_party/minizip-ng/LICENSE
+  Upstream:  https://github.com/zlib-ng/minizip-ng
+  Note:      Permissive; builds with the PS5 C toolchain.
+
+UnRAR — RAR extraction
+  Vendored:  third_party/unrar7
+  Licence:   Non-free but redistributable (UnRAR freeware licence)
+  Texts:     third_party/unrar7/license.txt
+  Upstream:  https://www.rarlab.com/rar_add.htm
+  Note:      Extraction only. Redistribution of modified source is
+             permitted provided this licence paragraph is reproduced in
+             the licence / documentation and in source comments. It may
+             NOT be used to build a RAR-compatible archiver or to
+             re-create the proprietary RAR compression algorithm.
+
+7-Zip / LZMA SDK — 7z decoder (LZMA/LZMA2/PPMd/BCJ2, AES)
+  Vendored:  third_party/7z (C decoder subset of LZMA SDK 26.03)
+  Licence:   Public domain (the LZMA SDK, by Igor Pavlov)
+  Texts:     third_party/7z/README.md
+  Upstream:  https://www.7-zip.org/sdk.html
+  Note:      Only the public-domain C decoder of the LZMA SDK is
+             vendored; the encoder half and the GPL-2.1+ 7-Zip
+             application code are NOT included.
 
 Linked but not vendored
 -----------------------
@@ -64,9 +100,9 @@ above.
   seregonwar/zftpd           MIT        socket buffer tuning reference
   itsPLK/ps5-payload-manager GPL-3.0    payload packaging reference
   etaHEN/etaHEN              GPL-3.0    ShellUI URI navigation used before exit
-  owendswang/wfm-7zip-helper GPL-3.0    archive extraction, distributed separately
-                                        and required at runtime for extraction
-                                        and for /api/extract
+  owendswang/wfm-7zip-helper GPL-3.0    the original helper-payload extraction
+                                        approach; since replaced by the in-process
+                                        engine (vendored 7z/unrar/minizip-ng)
 
 
 Licence compatibility
@@ -76,6 +112,13 @@ which the LGPL permits to be combined with GPL-3.0 code (LGPL-2.1 section 3
 allows relicensing to GPL-2.0-or-later, and GPL-3.0 is permitted by this
 project's own "or later" option). The BSD-licensed rpcgen-derived libnfs files
 are permissive and impose no additional condition beyond attribution.
+
+The Zlib-licensed zlib and minizip-ng, and the public-domain LZMA SDK decoder,
+are permissive / public domain and impose no condition beyond attribution.
+UnRAR is conveyed as a separate, non-free-but-redistributable component under
+its own terms (its licence notice is included above and in its source); it is
+not relicensed to GPL, which is permitted because it is merely redistributed
+alongside this project, not combined into the GPL work.
 
 PS5, PlayStation and related marks are trademarks of Sony Interactive
 Entertainment. This is unofficial homebrew and is neither affiliated with nor
