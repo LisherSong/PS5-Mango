@@ -108,7 +108,11 @@ enqueued from any part — the engine normalises them to the first volume.
   address in the console UI, and pick from the card list. The system installer
   downloads the file itself (Range requests) — the package never touches the
   console disk. The PC-side server is a single dependency-free Python script
-  (adapted from Loopayeh/pkg-sender's `serve_pkg.py`, MIT).
+  (adapted from Loopayeh/pkg-sender's `serve_pkg.py`, MIT). Windows users who
+  don't want Python can grab `serve-pkg.exe` from the
+  [GitHub Release](https://github.com/LisherSong/PS5-Mango/releases/latest)
+  (double-click serves the current folder); the console web UI's "从 PC 安装"
+  dialog also offers the same download buttons.
 
 ### Saves
 

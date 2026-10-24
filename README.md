@@ -60,7 +60,7 @@
 - 无需安装即可读取包体元数据（标题、标题 ID、版本、大小）。
 - **fPKG / 已解密的文件夹**：这类没有索尼的安装入口，因此"安装"意味着把它们复制到 `/data/homebrew`，由挂载文件夹类 payload 接管。
 - 常规 `.pkg` 文件交给系统安装器，它同时接受本地路径与 `http://` URL 作为包体 URI。
-- **从 PC 经局域网直接安装**（`PKG管理 → 从 PC 安装`）：在放有 `.pkg` 文件的文件夹里运行 `tools/serve-pkg.py`，在主机 UI 中输入 PC 地址，再从卡片列表里选择。系统安装器自行下载文件（Range 请求）——包体从不落盘到主机。PC 端服务是一个零依赖的 Python 脚本（改编自 Loopayeh/pkg-sender 的 `serve_pkg.py`，MIT）。
+- **从 PC 经局域网直接安装**（`PKG管理 → 从 PC 安装`）：在放有 `.pkg` 文件的文件夹里运行 `tools/serve-pkg.py`，在主机 UI 中输入 PC 地址，再从卡片列表里选择。系统安装器自行下载文件（Range 请求）——包体从不落盘到主机。PC 端服务是一个零依赖的 Python 脚本（改编自 Loopayeh/pkg-sender 的 `serve_pkg.py`，MIT）。不想装 Python 的 Windows 用户可直接从 [GitHub Release](https://github.com/LisherSong/PS5-Mango/releases/latest) 下载 `serve-pkg.exe`（双击即服务当前目录）；插件网页里「从 PC 安装」弹窗底部也有同样的下载入口。
 
 ### 存档
 
