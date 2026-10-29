@@ -27,7 +27,7 @@
 `POST /api/save_mgr/games` 原始响应（节选）：
 
 ```json
-{"title_id":"PPSA23226","path":"/user/home/1ea2f4d9/savedata_prospero/PPSA23226",
+{"title_id":"PPSA23226","path":"/user/home/<account-id>/savedata_prospero/PPSA23226",
  "size":0,"dir_name":"","slots":0,"installed":true,"game_title":"黑神话：悟空"}
 {"title_id":"PPSA16608", ... "size":0,"dir_name":"","slots":0,"installed":false,"game_title":"冰汽时代2"}
 {"title_id":"PPSA26344", ... "size":0,"dir_name":"","slots":0,"installed":false,"game_title":"羊蹄山之魂"}

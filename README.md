@@ -13,7 +13,7 @@
 
 该 payload 把整套前端（HTML/CSS/JS/图形）内嵌进 ELF 并压缩，因此部署只是一个文件，无需额外安装任何东西。
 
-> **版本在哪里显示。** 启动器（以及 etaHEN 的 *plugins / payload ELFs* 菜单）按**文件名**列出 payload，所以版本号刻意放在文件名里：构建产物为 `PS5-Mango-v1.0.elf`。在 Makefile 里改动 `VERSION_TAG` 会重命名产物——这也是主机上唯一能显示的版本标识。payload 还会在启动通知、stdout 以及 `/api/status` 接口中上报版本。
+> **版本在哪里显示。** 启动器（以及 etaHEN 的 *plugins / payload ELFs* 菜单）按**文件名**列出 payload，所以版本号刻意放在文件名里：构建产物为 `PS5-Mango-v1.1.elf`。在 Makefile 里改动 `VERSION_TAG` 会重命名产物——这也是主机上唯一能显示的版本标识。payload 还会在启动通知、stdout 以及 `/api/status` 接口中上报版本。
 
 ## 截图
 
@@ -41,12 +41,21 @@
 - 直接下载单个文件，或将文件夹/多项选择下载为即时生成的 `.tar` 流。
 - 工具栏（面包屑 + 操作）在列表滚动时固定在顶栏下方。
 
-### 网络共享（SMB / NFS）
+### 网络共享（SMB / NFS / WebDAV）
 
 - 通过内置的 [libsmb2](https://github.com/sahlberg/libsmb2) 支持 **SMB2/3**，通过内置的 [libnfs](https://github.com/sahlberg/libnfs) 支持 **NFSv3/v4**。
 - 共享以书签形式保存在浏览器中；服务器信息拆成 主机 / 共享 / 路径 / 端口 / 用户 / 密码 分别填写。
 - 地址栏接受你手头任何写法——`192.168.1.10/shared`、`192.168.1.10\shared`、`smb://192.168.1.10/shared`、`nfs://192.168.1.10/export`——并在使用前归一化。（Windows 风格的反斜杠在线路两侧都被接受；但 *密码* 中的 `\` 绝不会被改写。）
 - 用 `POST /api/fetch` 直接从共享把文件拉进主机存储（可续传，与上传一致）。
+- 通过内置的 [mbedTLS](https://github.com/Mbed-TLS/mbedtls) 支持 **WebDAV**，并可打开 **WebDAVS（HTTPS）**。
+  PS5 自身即是客户端，直连群晖 / 飞牛 / TrueNAS / Alist / Windows IIS 等 WebDAV 服务端，不经任何中转。
+  自签证书可直接连（不校验证书链）；已存在的书签可就地在 HTTP 与 HTTPS 之间切换，不必删了重加。
+
+### 播放
+
+- 直接在页面里播放视频与音频，不必先下载：取流走 `GET /api/fs/raw`，支持 HTTP Range。
+- 进度条可拖动（`206 Partial Content`，越界回 `416`），不会从头重放。
+- 播放不创建下载任务，因此不会点亮任务坞；视频与音频共用同一个面板。
 
 ### 归档
 
@@ -81,7 +90,7 @@
 
 ```sh
 export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
-make                 # -> PS5-Mango-v1.0.elf
+make                 # -> PS5-Mango-v1.1.elf
 ```
 
 `libmicrohttpd` 从 SDK 链接。`make` 会检查它，缺失时运行 `install-libmicrohttpd.sh`；若主机无网络，可指向你自己下载的 tarball
@@ -90,11 +99,12 @@ make                 # -> PS5-Mango-v1.0.elf
 在 Linux 上做本地 UI 开发——同一套代码，无 PS5 内核调用，含 `/icon0.png` favicon：
 
 ```sh
-make linux           # -> PS5-Mango-linux-v1.0
-./PS5-Mango-linux-v1.0
+make linux           # -> PS5-Mango-linux-v1.1
+./PS5-Mango-linux-v1.1
 ```
 
-`make NAS=0` 会剔除内置的 SMB/NFS 后端及其库。
+`make NAS=0` 会剔除内置的 SMB/NFS 后端及其库。`make MBTLS=0` 会剔除 mbedTLS，
+`webdavs://`（HTTPS）随之不可用，使用时明确报错而不是静默失败。
 
 > ⚠️ 在 Makefile 里改动 `VERSION_TAG` **并且**保持 `$(BIN)` 内的版本号。不在产物名里的版本号在主机上不可见；而只改 `VERSION_TAG` 还会被 `make` 漏掉（编译器 flags 不是任何目标的先决条件）——所以版本号才被刻意设为目标名的一部分。
 
@@ -104,7 +114,7 @@ make linux           # -> PS5-Mango-linux-v1.0
 
 ```sh
 export PS5_HOST=ps5_ip_address
-nc -q0 "$PS5_HOST" 9021 < PS5-Mango-v1.0.elf
+nc -q0 "$PS5_HOST" 9021 < PS5-Mango-v1.1.elf
 ```
 
 主机会弹出带版本号与实际监听端口的通知。然后，从局域网内任意设备打开：
@@ -142,8 +152,10 @@ python3 hosttest.py                 # 79 条断言，需要一个运行在 :1500
 - 删除是递归且永久的；没有回收站。
 - 上传与下载在 PS5 自带浏览器中被隐藏——它们本就是给局域网内另一台设备用的。
 - 复制/移动的文件在支持 Unix 模式的文件系统上以 `0777` 创建；FAT/exFAT 忽略这一点。模式在创建后设置，否则 umask 会把它们削掉。
-- 界面为简体中文。`assets/lang-*.js` 是为未来本地化预留的占位；UI 文本目前位于 `assets/index.html`。
+- 界面为简体中文与英文双语，文案在 `assets/lang-zh.js` / `assets/lang-en.js`（各 518 条），切换即时生效并记忆在浏览器本地存储中。
 - 归档解压在进程内完成（UnRAR / LZMA SDK / minizip-ng，内置在 `third_party/` 下）；不涉及外部 helper payload。
+- WebDAV 目前**只读**：可以浏览、播放、复制到本机，但上传 / 新建目录 / 移动改名（`PUT` / `MKCOL` / `MOVE`）尚未实现。
+- HTTPS 不校验证书链（自签的群晖/飞牛必须能连），也没有 TOFU 指纹，因此无法抵御中间人。
 
 ## 致谢
 

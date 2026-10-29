@@ -17,6 +17,7 @@
 #include <sys/syscall.h>
 #include <sys/sysctl.h>
 #include <sys/stat.h>
+#include <ucontext.h>   /* crash_handler 读 mc_rip/mc_rsp（FreeBSD 字段名） */
 #endif
 
 #include "app_installer.h"
@@ -26,6 +27,8 @@
 #include "notify.h"
 #include "savemgr.h"
 #include "websrv.h"
+#ifdef CLOUD_NET
+#endif
 
 /* ⚠️ Deliberately version-free, while the shipped file name is versioned
  * (PS5-Mango-<tag>.elf, see the Makefile). The payload manager lists payloads by
@@ -89,8 +92,12 @@ crash_write(int fd, const char *s, size_t n) {
 #endif
 
 static void
-crash_handler(int sig, siginfo_t *si, void *uc) {
-  (void)uc;
+crash_handler(int sig, siginfo_t *si, void *ucv) {
+#ifdef __SCE__
+  ucontext_t *uc = (ucontext_t *)ucv;
+#else
+  (void)ucv;
+#endif
   if(!g_in_crash) {
     int fd = open(CRASH_LOG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
 
@@ -110,6 +117,22 @@ crash_handler(int sig, siginfo_t *si, void *uc) {
       if(w > 0) {
         crash_write(fd, g_crash_buf, (size_t)w);
       }
+#ifdef __SCE__
+      /* PC / SP / BP —— 定位「崩在哪个函数」的唯一线索。
+       * 为什么要锚点：产物是 PIE 且不带符号表，单看绝对地址没有意义。
+       * 把本函数的运行时地址一起打出来，`pc - anchor` 就是代码段内的相对
+       * 偏移，拿**同一份构建**做 `objdump -d` 就能反查到具体的 call 位置。
+       * 只读 ucontext，不碰堆，信号上下文里安全。 */
+      if(uc) {
+        int w2 = snprintf(g_crash_buf, sizeof(g_crash_buf),
+                          "  pc=%llx sp=%llx bp=%llx anchor=%llx\n",
+                          (unsigned long long)uc->uc_mcontext.mc_rip,
+                          (unsigned long long)uc->uc_mcontext.mc_rsp,
+                          (unsigned long long)uc->uc_mcontext.mc_rbp,
+                          (unsigned long long)(uintptr_t)&crash_handler);
+        if(w2 > 0) crash_write(fd, g_crash_buf, (size_t)w2);
+      }
+#endif
       websrv_diag_recent(g_crash_buf, sizeof(g_crash_buf));
       crash_write(fd, g_crash_buf, strlen(g_crash_buf));
       (void)close(fd);
@@ -118,6 +141,13 @@ crash_handler(int sig, siginfo_t *si, void *uc) {
 
   signal(sig, SIG_DFL);
   raise(sig);
+  /* 正常到不了这里：SIGSEGV/SIGABRT 的默认动作是终止**整个进程**。
+   * 但真机上确实出现过「崩了，进程却结束不掉」—— 网页不再响应、PS5 上
+   * 也没有能把它关掉的入口，只能重启主机。可能的原因是 raise 只把信号
+   * 发给当前线程（崩的通常正是 MHD 的某个 worker 线程），而进程其余的
+   * 线程还活着，于是留下一个半损坏、又不肯死的进程。
+   * _exit 是 async-signal-safe 的，这里补一刀：不管怎样都别留卡死的尸体。 */
+  _exit(1);
 }
 
 /* 独立信号栈（static —— 处理器里绝不能 malloc）。

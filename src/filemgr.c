@@ -32,6 +32,7 @@
 #include "pkg_installer.h"
 #include "pkg_stream.h"
 #include "savemgr.h"
+#include "transfer.h"   /* transfer_scheme_supported()：pkg_src_is_remote 的协议判据 */
 #include "websrv.h"
 
 #define COPY_BUFFER_SIZE (8 * 1024 * 1024)
@@ -2817,6 +2818,10 @@ pkg_task_worker(void *arg) {
     char stream_url[1088];
     int  streamed = 0;
     int  remote = pkg_src_is_remote(task->srcs[0]);
+    /* 防御：凡是带 scheme 的源（哪怕注册表不认它）都不许退化成 path
+     * delivery —— 系统安装器拿到 `foo://…` 只会报一个无关的十六进制码。
+     * 这条兜底就是上面那次事故留下的坑本身。 */
+    int  src_is_url = strstr(task->srcs[0] ? task->srcs[0] : "", "://") != NULL;
 
     if(task->pkg_stream &&
        (remote ? pkg_stream_prepare_nas(task->srcs[0], stream_url, sizeof(stream_url))
@@ -2825,9 +2830,10 @@ pkg_task_worker(void *arg) {
       pkg_task_log("task %lu delivery=loopback-stream remote=%d uri=%s", task->id,
                    remote, stream_url);
     } else if(task->pkg_stream) {
-      if(remote) {
-        pkg_task_log("task %lu FAILED: NAS package unreadable, no path fallback",
-                     task->id);
+      if(remote || src_is_url) {
+        pkg_task_log("task %lu FAILED: remote source unreadable (remote=%d "
+                     "src=%s), no path fallback", task->id, remote,
+                     task->srcs[0]);
         task_set_error_code(task, "pkg_stream_unavailable",
                             "NAS 上的包无法读取（凭据/共享/网络），流式安装未启动");
         task_update(task, TASK_FAILED, task->srcs[0], 0,
@@ -3022,6 +3028,8 @@ filemgr_api_request(struct MHD_Connection *conn, const char *url,
     return api_list(conn, body, body_size);
   if(!strcmp(url, "/api/fs/read") || !strcmp(url, "/api/text"))
     return api_text(conn, body, body_size);
+  if(!strcmp(url, "/api/fs/raw"))
+    return api_fs_raw(conn, body, body_size);
   if(!strcmp(url, "/api/tasks")) return api_tasks(conn, body, body_size);
   if(!strcmp(url, "/api/space")) return api_space(conn, body, body_size);
   if(!strcmp(url, "/api/task/cancel") || !strcmp(url, "/api/cancel"))
@@ -3149,7 +3157,24 @@ filemgr_queue_pkg_stream(const char *path, unsigned long *out_id) {
  * path-delivery fallback the installer could accept. */
 int
 pkg_src_is_remote(const char *path) {
+  const char *sep;
+  char scheme[16];
+  size_t n;
+
   if(!path) return 0;
-  return !strncmp(path, "smb://", 6) || !strncmp(path, "nfs://", 6) ||
-         (!strncmp(path, "//", 2) && path[2] && path[2] != '/');
+  /* UNC（\\server\share 形态，URL 里写作 //server/share）。 */
+  if(!strncmp(path, "//", 2) && path[2] && path[2] != '/') return 1;
+  /* ⚠️ 协议判定必须查 transfer 后端注册表，不能写死 smb/nfs 清单
+   * （2026-10-27 真机事故 webdav PKG 安装 rc=0x80B21106）：清单里没有
+   * webdav ⇒ `webdav://…pkg` 被当成「本地文件」⇒ 本地流式发布失败后
+   * **静默退化**成把这个 URI 原样交给系统安装器，而它只认 http(s)/本地
+   * 路径，于是报一个与真实原因无关的十六进制码。改查注册表后，新加后端
+   * 自动生效，不会再漏。 */
+  sep = strstr(path, "://");
+  if(!sep) return 0;
+  n = (size_t)(sep - path);
+  if(!n || n >= sizeof(scheme)) return 0;
+  memcpy(scheme, path, n);
+  scheme[n] = 0;
+  return transfer_scheme_supported(scheme);
 }

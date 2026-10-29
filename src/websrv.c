@@ -526,10 +526,48 @@ websrv_listen(unsigned short port) {
   g_listen_fd = srvfd;
   g_listen_port = port;
 
+  /* ---- worker 线程栈：必须显式抬起来 ----------------------------------
+   * MHD 用 MHD_USE_THREAD_PER_CONNECTION，连接数 = 线程数（见上面
+   * HTTP_CONNECTION_LIMIT 的注释）。**不指定 MHD_OPTION_THREAD_STACK_SIZE
+   * 时 MHD 直接吃 pthread 默认栈**，而 PS5 的默认栈远小于 mbedTLS 握手需要：
+   *   · 同生态的 cobanov/PS5LM 在 ps5/ps5lm/app.cpp 里专门开一个大栈线程跑
+   *     mbedTLS，注释原文 "mbedTLS and the JSON code want more"，栈给 4 MiB；
+   *   · 本项目 cloud_net.c 的 cn_conn_open 曾经一个函数栈帧就有 96,064 B
+   *     （请求/状态行/响应头三块缓冲开在栈上，现已全部改堆），
+   *     2026-10-26 真机「一点扫码登录就崩」正是第一次在 worker 线程里跑 TLS。
+   * 取 max(1 MiB, 平台默认)：**只在默认更小时放大，绝不让栈比默认更小**。
+   * 万一 PS5 的默认本来就很宽裕，这一改既不该掩盖问题也不该引入回归。
+   * 顺手把默认值写进台账 —— 以后真机跑一次就能看到这个数字，不用再猜。
+   *
+   * 为什么是 1 MiB 而不是 PS5LM 的 4 MiB：PS5LM 那是**一个**专用线程，
+   * 这里连接数上限是 48，4 MiB × 48 = 192 MiB 虚拟地址。栈页虽然懒提交，
+   * 但虚拟地址本身要得下来才行 —— 一旦 mmap 失败就是线程建不出来、
+   * MHD_add_connection 失败、整个 accept 循环退出（见上面 CONNECTION_LIMIT
+   * 那段血泪注释：进程活着、网页再也打不开）。1 MiB × 48 = 48 MiB，
+   * 对实测峰值 22 KB 有 45 倍余量，也覆盖得住 mbedTLS 握手的几十 KB。 */
+  size_t worker_stack = (size_t)1 * 1024 * 1024;
+  size_t stack_default = 0;
+  {
+    pthread_attr_t a;
+    if(pthread_attr_init(&a) == 0) {
+      if(pthread_attr_getstacksize(&a, &stack_default) != 0) {
+        stack_default = 0;
+      }
+      pthread_attr_destroy(&a);
+    }
+    if(stack_default > worker_stack) {
+      worker_stack = stack_default;   /* 默认更大就跟随默认，不擅自缩小 */
+    }
+    mango_log("websrv_listen(%u): worker stack=%zu B (platform default=%zu B)",
+              port, worker_stack, stack_default);
+  }
+
   if(!(httpd = MHD_start_daemon(MHD_USE_THREAD_PER_CONNECTION | MHD_USE_ITC |
                                 MHD_USE_NO_LISTEN_SOCKET | MHD_USE_DEBUG |
                                 MHD_USE_INTERNAL_POLLING_THREAD | MHD_USE_TURBO,
                                 0, NULL, NULL, &websrv_on_request, NULL,
+                                MHD_OPTION_THREAD_STACK_SIZE,
+                                (size_t)worker_stack,
                                 MHD_OPTION_CONNECTION_MEMORY_LIMIT,
                                 (size_t)HTTP_CONNECTION_MEMORY_LIMIT,
                                 MHD_OPTION_CONNECTION_MEMORY_INCREMENT,

@@ -10,17 +10,21 @@ and checks the response shapes the front-end actually consumes.
 Run inside WSL:  python3 hosttest.py
 """
 import base64
+import gzip
 import hashlib
 import http.client
+import http.server
 import json
 import os
 import re
 import shutil
 import signal
 import socket
+import ssl
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import zipfile
@@ -75,6 +79,218 @@ def nas_port_open(port):
         return True
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# WebDAV fixture — a real HTTP server the payload talks to.
+#
+# 为什么要自带一个：transfer.c 的 webdav 后端（PROPFIND / HEAD / GET / DELETE
+# + Basic auth）从来没有被端到端跑过。以前目录里那个「webdav 测试」测的是
+# （cloud-gateway 曾把网盘包装成 WebDAV 服务端，方向相反；v1.0.8 云盘功能
+# 整体移除。）
+# 于是「NAS/PC 上开 WebDAV、PS5 去连」这条路一次都没验证过。
+#
+# XML 用标准 D: 命名空间前缀，因为真实服务器（nginx dav / Apache mod_dav /
+# rclone serve webdav）都这么写 —— 解析器自称 prefix-agnostic，就在这兑现它。
+# ---------------------------------------------------------------------------
+DAV_USER = "davuser"
+DAV_PASS = "davpass"
+DAV_FILES = {
+    "/dav/hello.txt": b"hello webdav\n",
+    "/dav/gone.txt": b"bye\n",
+    "/dav/sub/inner.bin": b"0123456789",
+    # 名字里带 '&'：PROPFIND 的 href 必须把它写成 &amp;（XML 文本转义）。
+    # 2026-10-29 真机的 mp4「列表能看见、打开说 not found」就落在这一类名字上，
+    # 单独开一个目录，避免污染 /dav 那条精确集合断言。
+    "/davamp/tom & jerry.mp4": b"MANGO-MP4-PAYLOAD",
+}
+# 大文件放在 /dav 之外：它不该出现在 /dav 的列目录断言里（那份断言是精确集合）。
+# 5 MiB > 4 MiB 的旧图片 cap —— 真机「7 MB 照片被截断」的最小复现。
+BIG_JPG = (b"\xff\xd8\xff\xe0MANGO" * (5 * 1024 * 1024 // 8 + 1))[:5 * 1024 * 1024]
+BIG_TXT = (b"mango-line\n" * (1536 * 1024 // 11 + 1))[:1536 * 1024]
+DAV_FILES["/davbig/big.jpg"] = BIG_JPG
+DAV_FILES["/davbig/big.txt"] = BIG_TXT
+DAV_HITS = []
+
+
+class DavHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *a):
+        pass
+
+    def _send(self, code, body=b"", ctype="text/plain; charset=utf-8",
+              extra=(), clen=None):
+        n = len(body) if clen is None else clen
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(n))
+        for k, v in extra:
+            self.send_header(k, v)
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def _authed(self):
+        want = "Basic " + base64.b64encode(
+            ("%s:%s" % (DAV_USER, DAV_PASS)).encode("utf-8")).decode("ascii")
+        got = (self.headers.get("Authorization") or "").strip()
+        if got == want:
+            return True
+        self._send(401, b"denied", extra=[("WWW-Authenticate", 'Basic realm="dav"')])
+        return False
+
+    def _children(self, base):
+        """{name: ("dir"|"file", size)} for one level under base."""
+        b = base.rstrip("/") or "/"
+        out = {}
+        for p, data in list(DAV_FILES.items()):
+            if not p.startswith(b + "/"):
+                continue
+            rel = p[len(b) + 1:]
+            head = rel.split("/", 1)[0]
+            out[head] = ("dir", 0) if "/" in rel else ("file", len(data))
+        return out
+
+    @staticmethod
+    def _esc(s):
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _path(self):
+        return urllib.parse.unquote(self.path.split("?", 1)[0])
+
+    def _multistatus(self, items):
+        """items = [(href, kind)]；kind: None 集合 / "dir" 集合 / int 文件字节。"""
+        parts = ['<?xml version="1.0" encoding="utf-8"?>',
+                 '<D:multistatus xmlns:D="DAV:">']
+        for href, kind in items:
+            parts.append("<D:response><D:href>%s</D:href><D:propstat><D:prop>"
+                         % self._esc(href))
+            if kind is None or kind == "dir":
+                parts.append("<D:resourcetype><D:collection/></D:resourcetype>")
+            else:
+                parts.append("<D:resourcetype/>")
+                parts.append("<D:getcontentlength>%d</D:getcontentlength>" % kind)
+            nm = href.rstrip("/").rsplit("/", 1)[-1]
+            if nm:
+                parts.append("<D:displayname>%s</D:displayname>" % self._esc(nm))
+            parts.append("<D:getlastmodified>Mon, 26 Oct 2026 10:00:00 GMT"
+                         "</D:getlastmodified>")
+            parts.append("</D:prop><D:status>HTTP/1.1 200 OK</D:status>"
+                         "</D:propstat></D:response>")
+        parts.append("</D:multistatus>")
+        return "".join(parts).encode("utf-8")
+
+    def do_PROPFIND(self):
+        DAV_HITS.append("PROPFIND")
+        if not self._authed():
+            return
+        n = int(self.headers.get("Content-Length") or 0)
+        if n:
+            self.rfile.read(n)
+        real = self._path()
+        # ★ 对**文件**的 PROPFIND：RFC 4918 §9.1 规定 Depth 一律按 0 处理，
+        #   应答里只有该资源自己一条、`<D:resourcetype/>` 为空。真实服务端
+        #   （nginx dav / 群晖 / 飞牛）就长这样。夹具原先无论请求什么都说
+        #   「你是集合」，于是「文件被当成空目录」那条真机 bug 在宿主上永远
+        #   复现不出来（后端跳过自身条目后 count=0 且返回成功，看起来毫无问题）。
+        if real in DAV_FILES:
+            self._send(207, self._multistatus([(real, len(DAV_FILES[real]))]),
+                       "application/xml; charset=utf-8")
+            return
+        base = real.rstrip("/")
+        items = [(base + "/", None)]                    # the collection itself
+        if (self.headers.get("Depth") or "1").strip() != "0":
+            for name, (kind, size) in sorted(self._children(base).items()):
+                items.append((base + "/" + name + "/", "dir") if kind == "dir"
+                             else (base + "/" + name, size))
+        self._send(207, self._multistatus(items),
+                   "application/xml; charset=utf-8")
+
+    def do_HEAD(self):
+        DAV_HITS.append("HEAD")
+        if not self._authed():
+            return
+        data = DAV_FILES.get(self._path())
+        if data is None:
+            self._send(404, b"")
+            return
+        # 真实 HEAD：报真实长度、不发 body（webdav_size 就靠这个 Content-Length）
+        self._send(200, b"", "application/octet-stream", clen=len(data))
+
+    def do_GET(self):
+        DAV_HITS.append("GET")
+        if not self._authed():
+            return
+        data = DAV_FILES.get(self._path())
+        if data is None:
+            self._send(404, b"not found")
+            return
+        # Range 支持：真实 WebDAV（nginx/Apache/rclone）都认 bytes=，后端也按
+        # 206 走捷径。不实现的话，「服务端忽略 Range」那条慢路径会让 5 MB 的
+        # 用例退化成每读一块都整包重传。
+        code, extra = 200, [("Accept-Ranges", "bytes")]
+        rng = self.headers.get("Range") or ""
+        if rng.startswith("bytes="):
+            try:
+                a, _, b = rng[len("bytes="):].partition("-")
+                start = int(a) if a else 0
+                end = int(b) if b else len(data) - 1
+                end = min(end, len(data) - 1)
+                if start <= end:
+                    extra.append(("Content-Range",
+                                  "bytes %d-%d/%d" % (start, end, len(data))))
+                    data = data[start:end + 1]
+                    code = 206
+            except ValueError:
+                pass
+        self._send(code, data, "application/octet-stream", extra=extra)
+
+    def do_DELETE(self):
+        DAV_HITS.append("DELETE")
+        if not self._authed():
+            return
+        if DAV_FILES.pop(self._path(), None) is None:
+            self._send(404, b"not found")
+        else:
+            self._send(204, b"")
+
+
+def start_dav_server():
+    """Start the fixture on an ephemeral port; returns (server, port)."""
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), DavHandler)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.server_address[1]
+
+
+def _make_selfsigned_cert(tmpdir):
+    """openssl CLI 造一张自签证书（NAS/群晖现实世界的默认形态）。
+    openssl 不可用时返回 None —— 上层按「夹具缺失」跳过，不算失败。"""
+    try:
+        cert = os.path.join(tmpdir, "dav-cert.pem")
+        key = os.path.join(tmpdir, "dav-key.pem")
+        subprocess.run(
+            ["openssl", "req", "-x509", "-newkey", "rsa:2048",
+             "-keyout", key, "-out", cert, "-days", "2", "-nodes",
+             "-subj", "/CN=127.0.0.1"],
+            check=True, capture_output=True, timeout=30)
+        return cert, key
+    except Exception:
+        return None
+
+
+def start_dav_tls_server(certfile, keyfile):
+    """同一个 DavHandler 包进 TLS —— 后端 webdavs 路径的端到端夹具。
+    真实服务器（群晖 5006 / Nextcloud）就是「HTTP 语义不变 + TLS 包裹」，
+    所以处理器零改动、只换 socket。"""
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), DavHandler)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certfile, keyfile)
+    srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.server_address[1]
 
 
 def check(name, cond, detail=""):
@@ -144,6 +360,17 @@ class Client:
     def get(self, path):
         return self.raw("GET", path)
 
+    def get_hdr(self, path, headers=None):
+        """GET，同时把应答头带回来 —— Range/Content-Range 这类断言要用。"""
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
+        conn.request("GET", path, headers=headers or {})
+        r = conn.getresponse()
+        data = r.read()
+        hdrs = {k.lower(): v for k, v in r.getheaders()}
+        st = r.status
+        conn.close()
+        return st, hdrs, data
+
     def get_json(self, path):
         st, d = self.raw("GET", path)
         return st, self.j(st, d)
@@ -152,6 +379,11 @@ class Client:
         b = json.dumps(obj, ensure_ascii=False).encode("utf-8")  # JSON.stringify
         st, d = self.raw("POST", path, b, {"Content-Type": "application/json"})
         return st, self.j(st, d)
+
+    def api_raw(self, path, obj):
+        """POST JSON，返回 (status, 原始字节) —— /api/fs/raw 这类二进制出口用。"""
+        b = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        return self.raw("POST", path, b, {"Content-Type": "application/json"})
 
     def api_post(self, path, obj):
         b = urllib.parse.urlencode(obj).encode("utf-8")
@@ -1584,10 +1816,20 @@ def main():
                   st == 501 and j and j.get("error_code") == "pkg_install_unsupported",
                   "st=%s j=%s" % (st, j))
             st, j = c.api_post("/api/pkg/enqueue",
-                               {"path": "/share/game.pkg", "scheme": "smb"})
+                               {"path": "/", "scheme": "smb"})
             check("pkg/enqueue scheme+无主机 -> 400（拼不出合法 NAS 地址）",
                   st == 400 and j and j.get("error_code") == "pkg_url_invalid",
                   "st=%s j=%s" % (st, j))
+            # ★ 前导分隔符不是垃圾：UNC 形状 \\host\share 归一化后就是
+            # //host/share。当年只有 list.c 那份跳前导分隔符，PKG 两份见到
+            # 开头是 '/' 就判死 ⇒ 同一个地址「列目录/读图正常、PKG 读不出来、
+            # 安装报 invalid NAS address」（真机 2026-10-28）。
+            st, j = c.api_post("/api/pkg/enqueue",
+                               {"path": "/192.0.2.1/share/game.pkg",
+                                "scheme": "smb"})
+            check("pkg/enqueue 前导 '/' 的 NAS 地址不再 400（与列目录同规则）",
+                  st == 501 and j and j.get("error_code")
+                  == "pkg_install_unsupported", "st=%s j=%s" % (st, j))
             st, j = c.api_post("/api/pkg/info",
                                {"path": "192.0.2.1/share/game.pkg",
                                 "scheme": "nosuch"})
@@ -2255,6 +2497,313 @@ def main():
             SKIP.append("NAS end-to-end (nothing listening on 127.0.0.1:%d; "
                         "run .build/nas-fixture.sh as root first)" % NAS_PORT)
 
+        # ---- 15a-quater. WebDAV：NAS/PC 开服务、PS5 直连（端到端） ----
+        # 这是「只有 PS5 也要能读 NAS」的落地路径：网盘走厂商 API，NAS 走
+        # SMB/NFS/WebDAV，三种都是 PS5 自己当客户端，不经任何中转设备。
+        # WebDAV 这一支此前完全没有端到端覆盖，这里用真的 HTTP 服务端补上。
+        dav_srv, dav_port = start_dav_server()
+        try:
+            dav_addr = "127.0.0.1/dav"
+            dav_common = {"scheme": "webdav", "port": str(dav_port),
+                          "user": DAV_USER, "pass": DAV_PASS}
+            st, j = c.api_json("/api/fs/list", dict(dav_common, path=dav_addr))
+            names = {e["name"]: e for e in (j or {}).get("entries", [])}
+            check("webdav list -> ok", bool(j and j.get("ok")), "st=%s j=%s" % (st, j))
+            check("webdav list entries (PROPFIND Depth:1)",
+                  set(names) == {"hello.txt", "gone.txt", "sub"},
+                  "names=%s" % sorted(names))
+            check("webdav file size comes from PROPFIND",
+                  (names.get("hello.txt") or {}).get("size")
+                  == len(DAV_FILES["/dav/hello.txt"]),
+                  "entry=%s" % names.get("hello.txt"))
+            check("webdav collection flagged as dir",
+                  (names.get("sub") or {}).get("is_dir") is True,
+                  "entry=%s" % names.get("sub"))
+            check("webdav sent PROPFIND over the wire", "PROPFIND" in DAV_HITS,
+                  "hits=%s" % DAV_HITS)
+
+            # 错密码：必须报认证失败，绝不能变成「空目录」（那会让用户以为盘是空的）
+            dav_bad = dict(dav_common)
+            dav_bad["path"] = dav_addr
+            dav_bad["pass"] = "wrong"
+            st, j = c.api_json("/api/fs/list", dav_bad)
+            err = (j or {}).get("error") or ""
+            check("webdav wrong password -> auth error, not empty listing",
+                  not (j or {}).get("ok") and "auth" in err.lower(),
+                  "st=%s j=%s" % (st, j))
+
+            # 地址里重复带端口：必须被拒绝，不能静默连到别的端口上
+            st, j = c.api_json("/api/fs/list",
+                               dict(dav_common, path="127.0.0.1:%d/dav" % dav_port))
+            check("webdav duplicated port in address -> rejected",
+                  not (j or {}).get("ok") and bool((j or {}).get("error")),
+                  "st=%s j=%s" % (st, j))
+
+            # 删除：必须打到远端的 DELETE（不是本地 unlink —— 那条路会把远端路径
+            # 当成本机相对路径，删错东西或报不存在）
+            DAV_HITS.clear()
+            st, j = c.api_post("/api/nas/delete",
+                               dict(dav_common, paths=dav_addr + "/gone.txt"))
+            c.wait_idle()
+            check("webdav delete reaches the server (DELETE issued)",
+                  "DELETE" in DAV_HITS, "hits=%s j=%s" % (DAV_HITS, j))
+            check("webdav delete removed the remote object",
+                  "/dav/gone.txt" not in DAV_FILES, "files=%s" % sorted(DAV_FILES))
+
+            st, j = c.api_json("/api/fs/list", dict(dav_common, path=dav_addr))
+            names2 = {e["name"] for e in (j or {}).get("entries", [])}
+            check("webdav list reflects the deletion",
+                  "gone.txt" not in names2 and "hello.txt" in names2,
+                  "names=%s" % sorted(names2))
+
+            # ---- 文件不是目录：transfer_list() 的契约与端到端落地 ----
+            # 2026-10-29 真机：把 NAS 上的照片「粘贴」到 PS5，落地变成一个空
+            # 文件夹、点开什么也没有。根因是 transfer_list() 对**文件**也返回
+            # 成功（服务端 PROPFIND 回 207，报文里只有文件自己一条，被当成
+            # 「集合自身」跳过后 count=0），而调用方判据是「列成功 ⇒ 是目录」，
+            # 于是 mkdir_p() 建出空目录还报成功。两边都钉住：
+            #   ① 契约 —— 对文件列目录必须失败；
+            #   ② 端到端 —— nas/copy 落地必须是普通文件且字节一致。
+            st, j = c.api_json("/api/fs/list",
+                               dict(dav_common, path=dav_addr + "/hello.txt"))
+            check("webdav list on a FILE fails (transfer_list means 'list a dir')",
+                  not (j or {}).get("ok")
+                  and "not a directory" in ((j or {}).get("error") or ""),
+                  "st=%s j=%s" % (st, j))
+
+            dav_dst = os.path.join(ROOT, "dav-pulled")
+            os.makedirs(dav_dst, exist_ok=True)
+            st, j = c.api_json("/api/nas/copy",
+                               dict(dav_common, paths=dav_addr + "/hello.txt",
+                                    dst=dav_dst))
+            dav_id = (j or {}).get("task_id")
+            check("webdav nas/copy queues a pull task",
+                  bool(j and j.get("ok")) and dav_id is not None,
+                  "st=%s j=%s" % (st, j))
+            dav_last = {}
+            if dav_id is not None:
+                for _ in range(150):
+                    st, pj = c.api_post("/api/install/poll", {"id": str(dav_id)})
+                    if not pj or not pj.get("ok"):
+                        break
+                    dav_last = pj
+                    if pj.get("state_name") in ("done", "failed", "cancelled"):
+                        break
+                    time.sleep(0.05)
+            c.wait_idle()
+            landed = os.path.join(dav_dst, "hello.txt")
+            check("webdav nas/copy lands a FILE, not an empty directory",
+                  os.path.isfile(landed) and not os.path.isdir(landed),
+                  "isdir=%s isfile=%s last=%s"
+                  % (os.path.isdir(landed), os.path.isfile(landed), dav_last))
+            got_dav = b""
+            if os.path.isfile(landed):
+                with open(landed, "rb") as f:
+                    got_dav = f.read()
+            check("webdav nas/copy landed the real bytes (photo would survive)",
+                  got_dav == DAV_FILES["/dav/hello.txt"],
+                  "got=%r" % (got_dav[:40],))
+
+            # 读内容（图片/文本预览走的就是这个接口）：必须走 transfer 抽象，
+            # 不能 fopen 一个远端地址。2026-10-27 真机：WebDAV 列目录正常、
+            # 点图片报「读取失败 / file not found」—— 服务端把
+            # host/share/path 当成本地路径 fopen 了，而前端没带 scheme/凭据。
+            DAV_HITS.clear()
+            st, j = c.api_json("/api/fs/read",
+                               dict(dav_common, path=dav_addr + "/hello.txt"))
+            check("webdav /api/fs/read -> ok (not a local fopen)",
+                  bool(j and j.get("ok")), "st=%s j=%s" % (st, j))
+            got = b""
+            if (j or {}).get("data"):
+                got = base64.b64decode(j["data"])
+            check("webdav /api/fs/read returns the real bytes",
+                  got == DAV_FILES["/dav/hello.txt"], "got=%r" % got[:40])
+            check("webdav /api/fs/read issued GET on the server",
+                  "GET" in DAV_HITS, "hits=%s" % DAV_HITS)
+
+            # 错密码：必须报「NAS 上读不到」，不能退化成 file not found
+            # （那会把「凭据错了」伪装成「文件不存在」，方向完全不同）。
+            st, j = c.api_json("/api/fs/read",
+                               dict(dav_common, path=dav_addr + "/hello.txt",
+                                    **{"pass": "wrong"}))
+            err = (j or {}).get("error") or ""
+            check("webdav /api/fs/read with a wrong password -> NAS error, "
+                  "not 'file not found'",
+                  not (j or {}).get("ok") and "NAS" in err,
+                  "st=%s j=%s" % (st, j))
+
+            # ---- 截断提示的两个数字（真机「已截断，仅显示前 7.1 MB」是错的）----
+            # 早年 JSON 只发 st.st_size（文件总大小），于是「一共 7.1 MB」被前端
+            # 当成「显示了前 7.1 MB」，而实际只取了 1 MiB。size 必须是**实际
+            # 返回**的字节数，total 才是完整大小 —— 两个数都得对。
+            st, j = c.api_json("/api/fs/read",
+                               dict(dav_common, path="127.0.0.1/davbig/big.txt"))
+            check("webdav truncated read reports size=actually returned, "
+                  "total=full file",
+                  bool((j or {}).get("ok")) and (j or {}).get("truncated") is True
+                  and (j or {}).get("size") == 1024 * 1024
+                  and (j or {}).get("total") == len(BIG_TXT),
+                  "st=%s size=%s total=%s want=%d/%d"
+                  % (st, (j or {}).get("size"), (j or {}).get("total"),
+                     1024 * 1024, len(BIG_TXT)))
+
+            # ---- /api/fs/raw：图片预览的二进制出口（不再受 4 MiB cap）----
+            st, data = c.api_raw("/api/fs/raw",
+                                 dict(dav_common, path="127.0.0.1/davbig/big.jpg"))
+            check("webdav /api/fs/raw -> 200 with the FULL body "
+                  "(5 MiB, past the old 4 MiB image cap)",
+                  st == 200 and len(data) == len(BIG_JPG),
+                  "st=%s got=%d want=%d" % (st, len(data), len(BIG_JPG)))
+            check("webdav /api/fs/raw bytes are intact",
+                  data == BIG_JPG, "len=%d" % len(data))
+            st, j = c.api_raw("/api/fs/raw",
+                              dict(dav_common, path="127.0.0.1/davbig/big.jpg",
+                                   **{"pass": "wrong"}))
+            ej = c.j(st, j)
+            check("webdav /api/fs/raw with a wrong password -> NAS error "
+                  "(502), not 'file not found'",
+                  st == 502 and "NAS" in ((ej or {}).get("error") or ""),
+                  "st=%s j=%s" % (st, ej))
+
+            # ---- Range：播放器拖进度条 / 边下边播靠的是 206，不是整份重拉 ----
+            # 2026-10-29 起播放走 /api/fs/raw（不再借下载任务），所以这条路必须
+            # 自己会分片：<video> 起播就发 Range，服务器回 200 会把首块当字节 0。
+            raw_q = "/api/fs/raw?" + urllib.parse.urlencode(
+                dict(dav_common, path="127.0.0.1/dav/hello.txt"))
+            st, hdrs, data = c.get_hdr(raw_q, {"Range": "bytes=2-5"})
+            check("webdav /api/fs/raw honours Range -> 206",
+                  st == 206, "st=%s hdrs=%s" % (st, hdrs))
+            check("webdav /api/fs/raw 206 carries Content-Range and Accept-Ranges",
+                  hdrs.get("content-range", "").startswith("bytes 2-5/")
+                  and hdrs.get("accept-ranges") == "bytes", "hdrs=%s" % hdrs)
+            check("webdav /api/fs/raw 206 body is exactly the requested window",
+                  data == DAV_FILES["/dav/hello.txt"][2:6], "got=%r" % data)
+
+            st, hdrs, data = c.get_hdr(raw_q, {"Range": "bytes=99999-"})
+            check("webdav /api/fs/raw out-of-range Range -> 416",
+                  st == 416 and hdrs.get("content-range", "").startswith("bytes */"),
+                  "st=%s hdrs=%s" % (st, hdrs))
+
+            # ---- 名字保真：href 里的 XML 实体必须还原（'&' 被写成 &amp;） ----
+            # 真机 mp4 报 `webdav: not found` 而 mp3 能播：同一个目录、同一条链路，
+            # 只有带 '&' 的那个文件打不开 —— 名字取自 XML 文本却没还原实体，
+            # GET 的路径里就带着字面量 "&amp;"。
+            st, j = c.api_json("/api/fs/list",
+                               dict(dav_common, path="127.0.0.1/davamp"))
+            nm = sorted(e["name"] for e in (j or {}).get("entries", []))
+            check("webdav list decodes XML entities in href (& not &amp;)",
+                  nm == ["tom & jerry.mp4"], "names=%r" % (nm,))
+            st, j = c.api_json("/api/fs/read",
+                               dict(dav_common, path="127.0.0.1/davamp/tom & jerry.mp4"))
+            got = b""
+            if (j or {}).get("data"):
+                got = base64.b64decode(j["data"])
+            check("webdav opens a file whose name contains '&' (masked 404)",
+                  bool((j or {}).get("ok"))
+                  and got == DAV_FILES["/davamp/tom & jerry.mp4"],
+                  "st=%s j=%s" % (st, (j or {}).get("error")))
+
+            # ---- NAS 下载 / 播放：/api/download/prepare 不许对 NAS path 做 lstat ----
+            # 真机（2026-10-28）：点下载与播视频都报「下载失败：file not found」
+            # —— prepare 里 lstat("host/share/x") 必然 ENOENT。
+            st, j = c.api_post("/api/download/prepare",
+                               dict(dav_common, paths="127.0.0.1/dav/hello.txt"))
+            dl_id = (j or {}).get("task_id")
+            check("webdav /api/download/prepare -> ok + task_id "
+                  "(no local lstat of a NAS path)",
+                  bool((j or {}).get("ok")) and dl_id is not None,
+                  "st=%s j=%s" % (st, j))
+            if dl_id is not None:
+                st, data = c.get("/api/download?id=%s" % dl_id)
+                check("webdav GET /api/download streams the exact bytes",
+                      st == 200 and data == DAV_FILES["/dav/hello.txt"],
+                      "st=%s got=%r" % (st, data[:40]))
+            c.wait_idle()
+            # 错密码：prepare 阶段就该失败（502），不能等到 GET 才炸
+            st, j = c.api_post("/api/download/prepare",
+                               dict(dav_common, paths="127.0.0.1/dav/hello.txt",
+                                    **{"pass": "wrong"}))
+            check("webdav /api/download/prepare with a wrong password -> "
+                  "NAS error, not 'file not found'",
+                  not (j or {}).get("ok") and st == 502,
+                  "st=%s j=%s" % (st, j))
+
+            # ---- PKG 读元信息 / 入队：前导 '/' 的地址必须和列目录同规则 ----
+            # 真机（2026-10-28 v1.0.9）：webdav 书签是 /192.168.1.3:5005/dav/…
+            # ⇒ 列目录、读图全过（list.c 跳前导分隔符），PKG 读元信息报
+            # "could not read package information"、安装报 "invalid NAS address"。
+            # 判据不看返回码（一个不是 PKG 的文件本来就读不出元信息），
+            # 看**服务端到底有没有收到请求**：地址被判死 ⇒ 一次往返都没有。
+            del DAV_HITS[:]
+            st, j = c.api_post("/api/pkg/info",
+                               dict(dav_common, path="/127.0.0.1/dav/hello.txt"))
+            check("webdav /api/pkg/info 前导 '/' 的地址真的去问了 NAS"
+                  "（不再在拼地址那一步就死）",
+                  any(h in ("HEAD", "PROPFIND", "GET") for h in DAV_HITS),
+                  "hits=%s st=%s j=%s" % (DAV_HITS, st, j))
+            st, j = c.api_post("/api/pkg/enqueue",
+                               dict(dav_common, path="/127.0.0.1/dav/hello.txt"))
+            check("webdav /api/pkg/enqueue 前导 '/' 的地址不再 400 "
+                  "invalid NAS address",
+                  st == 501 and (j or {}).get("error_code")
+                  == "pkg_install_unsupported", "st=%s j=%s" % (st, j))
+        finally:
+            dav_srv.shutdown()
+            dav_srv.server_close()
+
+        # ---- 15a-quinquies. WebDAVS（TLS）：自签证书也必须能连 ----
+        # 群晖 5006 / Nextcloud 的现实形态 = 同一套 HTTP 语义 + TLS 包裹 +
+        # 自签证书。后端策略是 VERIFY_NONE（刻意：全校验会让「自家 NAS 5006」
+        # 全灭），这里的断言是：①TLS 全链路 PROPFIND 207 可用 ②自签不被拒
+        # ③地址里带端口（端口框留空）的形状照样工作 ④Basic 认证在 TLS 上
+        # 语义不变。证书造不出来（无 openssl）按夹具缺失跳过，不算失败。
+        cert_pair = _make_selfsigned_cert(ROOT)
+        if not cert_pair:
+            print("  SKIP webdavs (no openssl for self-signed cert)")
+        else:
+            dav_tls_srv, dav_tls_port = start_dav_tls_server(*cert_pair)
+            try:
+                davt_common = {"scheme": "webdavs", "port": str(dav_tls_port),
+                               "user": DAV_USER, "pass": DAV_PASS}
+                st, j = c.api_json("/api/fs/list",
+                                   dict(davt_common, path="127.0.0.1/dav"))
+                namesT = {e["name"]: e for e in (j or {}).get("entries", [])}
+                check("webdavs list -> ok over TLS with self-signed cert",
+                      bool(j and j.get("ok")), "st=%s j=%s" % (st, j))
+                check("webdavs entries match (PROPFIND inside TLS)",
+                      set(namesT) == {"hello.txt", "sub"},
+                      "names=%s" % sorted(namesT))
+
+                # 地址里写端口、端口框留空的形状（webdavs 的主用例：
+                # 群晖 5006 这类非常规端口）。解析必须把 host:port 拆对，
+                # 否则会连到 443 上撞死。
+                st, j = c.api_json(
+                    "/api/fs/list",
+                    dict(davt_common, port="",
+                         path="127.0.0.1:%d/dav" % dav_tls_port))
+                check("webdavs embedded port in address works",
+                      bool((j or {}).get("ok"))
+                      and {e["name"] for e in (j or {}).get("entries", [])}
+                      == {"hello.txt", "sub"},
+                      "st=%s j=%s" % (st, j))
+
+                # TLS 之上 Basic 认证语义不变：错密码仍报 auth。
+                davt_bad = dict(davt_common, path="127.0.0.1/dav")
+                davt_bad["pass"] = "wrong"
+                st, j = c.api_json("/api/fs/list", davt_bad)
+                errT = (j or {}).get("error") or ""
+                check("webdavs wrong password -> auth error over TLS",
+                      not (j or {}).get("ok") and "auth" in errT.lower(),
+                      "st=%s j=%s" % (st, j))
+            finally:
+                dav_tls_srv.shutdown()
+                dav_tls_srv.server_close()
+                for f in cert_pair:
+                    try:
+                        os.remove(f)
+                    except OSError:
+                        pass
+
         # Local scheme unchanged (regression guard for the owendswang path).
         st, j = c.api_json("/api/fs/list", {"scheme": "local", "path": "/nonexistent-xyz"})
         check("local scheme missing path -> 404 (unchanged)",
@@ -2628,6 +3177,34 @@ int main(int argc, char **argv) {
         check("POST /api/save_mgr/delete 标题不存在 -> 404 save not found",
               st == 404 and (j or {}).get("error") == "save not found",
               "st=%s j=%s" % (st, j))
+
+        # ---- 幽灵卡片（2026-10-29）----------------------------------------
+        # 浏览页是按**目录**扫的（/user/home/<uid>/savedata_prospero/<TID>/），
+        # 不是按镜像扫的。于是「镜像删光、目录还在」会生成一张卡（槽位 0）；
+        # 而整体删除按槽位循环，槽位 0 个 ⇒ 返回 0 ⇒ 旧实现回 save not found，
+        # 卡片永远点不掉。三件事一起钉住：删槽位后清目录、槽位 0 能清、
+        # 清掉之后不能报 not found。
+        check("整体删除后空的 TITLE_ID 目录被清掉（幽灵卡片根因）",
+              not os.path.isdir(gbase) and not os.path.isdir(gico),
+              "sd_dir=%s ico_dir=%s"
+              % (os.path.isdir(gbase), os.path.isdir(gico)))
+
+        ghost_tid = "PPSA0GHOST"
+        ghost_sd = os.path.join(save_root, fake_uid, "savedata_prospero",
+                                ghost_tid)
+        ghost_ico = os.path.join(save_root, fake_uid, "savedata_prospero_meta",
+                                 "user", ghost_tid)
+        os.makedirs(ghost_sd, exist_ok=True)
+        os.makedirs(ghost_ico, exist_ok=True)
+        st, j = c.api_post("/api/save_mgr/delete",
+                           {"uid": fake_uid, "title_id": ghost_tid})
+        check("槽位 0 的残留空目录 -> 200 ok + cleaned（旧实现回 404）",
+              st == 200 and (j or {}).get("deleted") == 0
+              and (j or {}).get("cleaned", 0) >= 1, "st=%s j=%s" % (st, j))
+        check("残留的空目录真的被清掉（那张卡不会再出现）",
+              not os.path.isdir(ghost_sd) and not os.path.isdir(ghost_ico),
+              "sd=%s ico=%s"
+              % (os.path.isdir(ghost_sd), os.path.isdir(ghost_ico)))
 
         # ---- 备份 → 列备份 → 还原（2026-10-12）----
         # 还原走的是「同机同账号直拷回原路径」这条**零挂载**通道：镜像是加密的

@@ -1,9 +1,14 @@
 #ifndef TRANSFER_H
 #define TRANSFER_H
-/* Transfer abstraction: local FS / SMB(libsmb2) / NFS(libnfs) all expose the
- * same "readable stream + listable directory" interface. NAS browse / pull /
- * verify / atomic land / resume therefore reuse ONE code path.
- * New backends are added here only — no other module changes. */
+/* Transfer abstraction: local FS / SMB(libsmb2) / NFS(libnfs) / WebDAV all
+ * expose the same "readable stream + listable directory" interface. NAS
+ * browse / pull / verify / atomic land / resume therefore reuse ONE code path.
+ *
+ * ★ 加新后端：见 docs/ADDING-A-BACKEND.md。
+ *   做法是新建 src/backend_xxx.c 实现 transfer_backend_t（定义在
+ *   transfer_internal.h），再在注册表登记一行 —— 不必改这里的任何声明，
+ *   也不必动 dispatch。不要往 transfer_list/read/size/... 里加
+ *   `if (scheme == ...)`：那正是以前「加一个源要改八处」的来源。 */
 #include "mango_common.h"
 
 #ifndef MANGO_PATH_MAX
@@ -12,8 +17,14 @@
 
 typedef struct transfer_src transfer_src_t; /* opaque backend */
 
+/* NAS 条目名的字节上限（UTF-8，不是字符数）。
+ * 🪤 旧值 256：中文/日文名是 3 字节一个字，80 个字的电影名就顶到上限，
+ *    截断后前端拿去 open 的是**半截名字** ⇒ 服务器 404 ⇒
+ *    「列表里有、打开说找不到」。文件名进了路径就不再是标签，截断即改路径。 */
+#define MANGO_NAS_NAME_MAX 512
+
 typedef struct {
-    char  name[256];
+    char  name[MANGO_NAS_NAME_MAX];
     uint64_t size;
     uint64_t mtime;   /* seconds since epoch; 0 when unknown */
     uint32_t mode;    /* st_mode permission bits; 0 when unknown */
@@ -35,8 +46,9 @@ typedef struct {
     char path[MANGO_PATH_MAX];
     char user[128];
     char pass[128];
-    int  port;   /* 0 = default for the scheme (445 SMB / 2049 NFS) */
+    int  port;   /* 0 = default for the scheme (445 SMB / 2049 NFS / 80 WebDAV) */
     int  server_only;
+    int  tls;    /* webdav only: 1 = https（TLS）；port 缺省随之变 443 */
 } transfer_nas_t;
 
 /* scheme: "local:" | "smb:" | "nfs:" (default local). */

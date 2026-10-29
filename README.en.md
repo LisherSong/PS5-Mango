@@ -12,7 +12,7 @@ console, pull from and push to network shares, unpack archives, install
 packages, and back up / restore game saves — all from a browser on the same
 network (or from the PS5's own browser).
 
-**Version:** v1.0
+**Version:** v1.1
 
 The payload embeds its whole front-end (HTML/CSS/JS/graphics) and compresses it
 into the ELF, so deployment is one file and there is nothing to install
@@ -21,7 +21,7 @@ alongside it.
 > **Where the version is shown.** The payload manager (and etaHEN's
 > *plugins / payload ELFs* menu) lists payloads by **file name**, so the version
 > deliberately lives in the file name: the build output is
-> `PS5-Mango-v1.0.elf`. Bumping `VERSION_TAG` in the Makefile renames the
+> `PS5-Mango-v1.1.elf`. Bumping `VERSION_TAG` in the Makefile renames the
 > artifact, which is the only thing the console can display.
 > The payload also reports its version in the startup notification, on stdout,
 > and over `/api/status`.
@@ -64,7 +64,7 @@ Chinese):
 - The toolbar (breadcrumbs + actions) stays pinned below the top bar while the
   list scrolls.
 
-### Network shares (SMB / NFS)
+### Network shares (SMB / NFS / WebDAV)
 
 - **SMB2/3** via a vendored [libsmb2](https://github.com/sahlberg/libsmb2), and
   **NFSv3/v4** via a vendored [libnfs](https://github.com/sahlberg/libnfs).
@@ -77,6 +77,21 @@ Chinese):
   is never rewritten.)
 - Pull a file straight off a share into the console's storage with
   `POST /api/fetch` (resumable, same as upload).
+- **WebDAV**, optionally over **WebDAVS (HTTPS)**, via a vendored
+  [mbedTLS](https://github.com/Mbed-TLS/mbedtls). The console is the client:
+  it talks directly to Synology / fnOS / TrueNAS / Alist / Windows IIS and any
+  other WebDAV server, with nothing in between. Self-signed certificates are
+  accepted (the chain is not verified), and an existing bookmark can be
+  flipped between HTTP and HTTPS in place instead of being re-created.
+
+### Playback
+
+- Play video and audio in the page instead of downloading the whole file
+  first: the stream comes from `GET /api/fs/raw` with HTTP Range support.
+- The progress bar seeks (`206 Partial Content`, `416` past the end); it
+  does not restart from the beginning.
+- Playback creates no download task, so the task dock stays quiet. Video
+  and audio share one panel.
 
 ### Archives
 
@@ -146,7 +161,7 @@ Requires the [PS5 payload SDK](https://github.com/ps5-payload-dev/sdk#quick-star
 
 ```sh
 export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
-make                 # -> PS5-Mango-v1.0.elf
+make                 # -> PS5-Mango-v1.1.elf
 ```
 
 `libmicrohttpd` is linked from the SDK. `make` checks for it and runs
@@ -158,11 +173,13 @@ For local UI work on Linux — same code, no PS5 kernel calls, includes the
 `/icon0.png` favicon:
 
 ```sh
-make linux           # -> PS5-Mango-linux-v1.0
-./PS5-Mango-linux-v1.0
+make linux           # -> PS5-Mango-linux-v1.1
+./PS5-Mango-linux-v1.1
 ```
 
 `make NAS=0` drops the vendored SMB/NFS backends and their libraries.
+`make MBTLS=0` drops mbedTLS, which makes `webdavs://` (HTTPS) unavailable —
+it then fails with a clear error instead of silently falling back.
 
 > ⚠️ Bump `VERSION_TAG` in the Makefile **and** keep the version inside `$(BIN)`.
 > A version that is not in the artifact name is invisible on the console, and a
@@ -177,7 +194,7 @@ Send the built ELF to an ELF loader on the console (the usual listener is
 
 ```sh
 export PS5_HOST=ps5_ip_address
-nc -q0 "$PS5_HOST" 9021 < PS5-Mango-v1.0.elf
+nc -q0 "$PS5_HOST" 9021 < PS5-Mango-v1.1.elf
 ```
 
 The console shows a notification with the version and the actual listen port.
@@ -229,10 +246,15 @@ redirected away from the console's:
 - Copied and moved files are created `0777` on filesystems that support Unix
   modes; FAT/exFAT ignore this. Modes are set after creation, since the umask
   would otherwise trim them.
-- The interface is Simplified Chinese. `assets/lang-*.js` are placeholders for
-  future localisation; the UI text currently lives in `assets/index.html`.
+- The interface is bilingual (Simplified Chinese and English); the strings live in
+  `assets/lang-zh.js` and `assets/lang-en.js` (518 keys each) and the choice is
+  remembered in the browser's local storage.
 - Archive extraction runs in-process (UnRAR / LZMA SDK / minizip-ng, vendored
   under `third_party/`); no external helper payload is involved.
+- WebDAV is **read-only** for now: browsing, playback and copying to the console
+  work, but upload / `MKCOL` / `MOVE` (`PUT` and friends) are not implemented.
+- HTTPS does not verify the certificate chain (self-signed Synology/fnOS devices
+  must connect) and there is no TOFU pinning, so it does not stop a MITM.
 
 ## Credits
 

@@ -13,6 +13,7 @@
 #include "filemgr_internal.h"
 #include "json_util.h"
 #include "path_util.h"
+#include "readsrc.h"
 #include "websrv.h"
 
 #define DOWNLOAD_ARCHIVE_NAME_LIMIT 20
@@ -54,6 +55,20 @@ typedef struct download_file_stream {
   int done;
   int error;
 } download_file_stream_t;
+
+/* NAS 单文件下载流（v1.0.9）：与上面的本地流逐字段对应，只是字节来源换成
+ * read_src（本地 fd / SMB / NFS / WebDAV 同一接口）。
+ * 为什么不复用一个结构：本地那支用的是 pread(fd)，NAS 这边是 transfer_read，
+ * 硬塞一个 union 会让「这次到底打开的是哪一种」变成运行期分支，读代码的人
+ * 反而更难确认有没有退化成本地路径。 */
+typedef struct nas_download_stream {
+  file_task_t *task;
+  read_src_t *src;
+  unsigned long long size;
+  unsigned long long sent;
+  int done;
+  int error;
+} nas_download_stream_t;
 
 static enum MHD_Result
 download_task_request_error(struct MHD_Connection *conn, file_task_t *task,
@@ -408,10 +423,18 @@ prepare_download_task(file_task_t *task) {
   size_t i;
 
   task_update(task, TASK_RUNNING, "preparing", 0, NULL);
-  for(i = 0; i < task->src_count; i++) {
-    if(count_task_path_bytes(task, task->srcs[i], task->srcs[i],
-                             &total, &file_count, &dir_count)) {
-      return -1;
+  /* NAS：大小在 prepare 那一步已经探到了（顺便验证了源可读）。
+   * count_task_path_bytes 是本地 walk（stat + 递归），喂它 host/share/x
+   * 只会拿到 ENOENT —— 于是「准备下载」直接失败。 */
+  if(task->nas_scheme[0]) {
+    total = task->nas_size;
+    file_count = 1;
+  } else {
+    for(i = 0; i < task->src_count; i++) {
+      if(count_task_path_bytes(task, task->srcs[i], task->srcs[i],
+                               &total, &file_count, &dir_count)) {
+        return -1;
+      }
     }
   }
   pthread_mutex_lock(&g_tasks_lock);
@@ -529,11 +552,15 @@ add_download_filename_header(struct MHD_Response *resp, const char *name) {
 
 static enum MHD_Result
 create_download_task_response(struct MHD_Connection *conn, char **paths,
-                              size_t count) {
+                              size_t count, const char *scheme,
+                              const char *user, const char *pass,
+                              const char *port) {
   file_task_t *task = calloc(1, sizeof(file_task_t));
   strbuf_t b = {0};
   struct stat st;
   size_t i;
+  /* NAS 作用域：非空且非 "local"。判据与 /api/fs/read、/api/fs/raw 一致。 */
+  int nas = scheme && *scheme && strcmp(scheme, "local");
 
   if(!task) {
     free_paths(paths, count);
@@ -543,7 +570,38 @@ create_download_task_response(struct MHD_Connection *conn, char **paths,
     return download_task_request_error(conn, task, paths, count,
                                        MHD_HTTP_BAD_REQUEST, "no source paths");
   }
-  for(i = 0; i < count; i++) {
+  if(nas) {
+    read_src_t *src;
+    char why[384];
+
+    /* 打包下载要遍历目录，而远端遍历要另起一套（tar 支现在只认本地
+     * open/opendir）。与其让它在中途炸掉，不如在入口说清限制：单选文件
+     * 这一条主路径（下载、播放）已经通了。 */
+    if(count != 1) {
+      return download_task_request_error(conn, task, paths, count,
+                                         MHD_HTTP_BAD_REQUEST,
+                                         "打包下载暂不支持 NAS，请单选一个文件");
+    }
+    /* 🪤 这里以前是 lstat(paths[i])：NAS 的 path 是 host/share/x，本地
+     * lstat 必然 ENOENT ⇒ 「下载失败：file not found」。真机反馈正是这句。
+     * 改成用作用域打开一次（顺手把大小取回来，省掉 GET 时再探一次）。 */
+    src = read_src_open(paths[0], scheme, user, pass, port);
+    if(read_src_bad(src)) {
+      snprintf(why, sizeof(why), "NAS 文件读取失败：%s", read_src_error(src));
+      read_src_close(src);
+      return download_task_request_error(conn, task, paths, count,
+                                         MHD_HTTP_BAD_GATEWAY, why);
+    }
+    task->nas_size = (unsigned long long)read_src_size(src);
+    read_src_close(src);
+    snprintf(task->nas_scheme, sizeof(task->nas_scheme), "%s", scheme);
+    if(user) snprintf(task->nas_user, sizeof(task->nas_user), "%s", user);
+    if(pass) snprintf(task->nas_pass, sizeof(task->nas_pass), "%s", pass);
+    if(port) snprintf(task->nas_port, sizeof(task->nas_port), "%s", port);
+    task->file_count = 1;
+    task->total = task->nas_size;
+  }
+  for(i = 0; !nas && i < count; i++) {
     if(lstat(paths[i], &st)) {
       return download_task_request_error(conn, task, paths, count,
                                          MHD_HTTP_NOT_FOUND, "file not found");
@@ -583,15 +641,26 @@ enum MHD_Result
 api_download_prepare(struct MHD_Connection *conn, const char *body,
                      size_t body_size) {
   char *paths_raw = body_form_value(body, body_size, "paths");
+  /* NAS 作用域：与 /api/fs/list、/api/fs/read 同口径（scheme/user/pass/port），
+   * 缺了它们服务端拼不出共享地址，于是又退回「file not found」。 */
+  char *scheme = req_param(conn, body, body_size, "scheme");
+  char *user = req_param(conn, body, body_size, "user");
+  char *pass = req_param(conn, body, body_size, "pass");
+  char *port = req_param(conn, body, body_size, "port");
   char **paths = NULL;
   size_t count = 0;
+  enum MHD_Result r;
 
   if(!paths_raw || parse_paths(paths_raw, &paths, &count)) {
     free(paths_raw);
+    free(scheme); free(user); free(pass); free(port);
     return send_json_error(conn, MHD_HTTP_BAD_REQUEST, "invalid path");
   }
   free(paths_raw);
-  return create_download_task_response(conn, paths, count);
+  r = create_download_task_response(conn, paths, count, scheme, user, pass,
+                                    port);
+  free(scheme); free(user); free(pass); free(port);
+  return r;
 }
 
 static ssize_t
@@ -651,6 +720,55 @@ download_file_close(void *cls) {
   free(s);
 }
 
+static ssize_t
+nas_download_read(void *cls, uint64_t pos, char *buf, size_t max) {
+  nas_download_stream_t *s = cls;
+  size_t got = 0;
+  unsigned long long end, add;
+
+  if(task_cancel_requested(s->task)) {
+    s->error = ECANCELED;
+    return MHD_CONTENT_READER_END_WITH_ERROR;
+  }
+  if(pos >= s->size) {
+    s->done = 1;
+    return MHD_CONTENT_READER_END_OF_STREAM;
+  }
+  if(read_src_pread(s->src, pos, buf, max, &got)) {
+    s->error = EIO;
+    return MHD_CONTENT_READER_END_WITH_ERROR;
+  }
+  if(!got) {
+    s->done = 1;
+    return MHD_CONTENT_READER_END_OF_STREAM;
+  }
+  end = (unsigned long long)pos + (unsigned long long)got;
+  add = end > s->sent ? end - s->sent : 0;
+  if(end > s->sent) s->sent = end;
+  if(s->sent >= s->size) s->done = 1;
+  task_update(s->task, TASK_RUNNING, s->task->src, add, NULL);
+  return (ssize_t)got;
+}
+
+static void
+nas_download_close(void *cls) {
+  nas_download_stream_t *s = cls;
+
+  if(!s) return;
+  if(s->src) read_src_close(s->src);
+  if(task_cancel_requested(s->task)) {
+    task_update(s->task, TASK_CANCELED, s->task->src, 0, "canceled");
+  } else if(s->error) {
+    errno = s->error;
+    task_update(s->task, TASK_FAILED, s->task->src, 0, strerror(errno));
+  } else if(s->done) {
+    task_update(s->task, TASK_DONE, s->task->src, 0, NULL);
+  } else {
+    task_update(s->task, TASK_FAILED, s->task->src, 0, "client disconnected");
+  }
+  free(s);
+}
+
 enum MHD_Result
 api_download(struct MHD_Connection *conn) {
   char *idstr = query_value(conn, "id");
@@ -689,6 +807,45 @@ api_download(struct MHD_Connection *conn) {
 
   paths = task->srcs;
   count = task->src_count;
+  /* NAS 分支必须排在 stat 之前：stat("host/share/x") 只会 ENOENT，
+   * 一落到下面的本地分支就又是「file not found」。 */
+  if(task->nas_scheme[0] && count == 1) {
+    nas_download_stream_t *ns = calloc(1, sizeof(*ns));
+    read_src_t *src;
+
+    if(!ns) {
+      task_update(task, TASK_FAILED, task->src, 0, "out of memory");
+      return send_json_error(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+    ns->task = task;
+    src = read_src_open(paths[0], task->nas_scheme, task->nas_user,
+                        task->nas_pass, task->nas_port);
+    if(read_src_bad(src)) {
+      read_src_close(src);
+      free(ns);
+      task_update(task, TASK_FAILED, task->src, 0, "NAS source unreadable");
+      return send_json_error(conn, MHD_HTTP_BAD_GATEWAY,
+                             "cannot read this file from the NAS");
+    }
+    ns->src = src;
+    ns->size = (unsigned long long)read_src_size(src);
+    ns->done = ns->size == 0;
+    resp = MHD_create_response_from_callback((uint64_t)ns->size,
+                                             DOWNLOAD_BUFFER_SIZE,
+                                             nas_download_read, ns,
+                                             nas_download_close);
+    if(!resp) {
+      nas_download_close(ns);
+      return MHD_NO;
+    }
+    MHD_add_response_header(resp, MHD_HTTP_HEADER_CONTENT_TYPE,
+                            "application/octet-stream");
+    download_file_name(download_name, sizeof(download_name), paths[0]);
+    add_download_filename_header(resp, download_name);
+    ret = websrv_queue_response(conn, MHD_HTTP_OK, resp);
+    MHD_destroy_response(resp);
+    return ret;
+  }
   if(count == 1 && !stat(paths[0], &st) && S_ISREG(st.st_mode)) {
     download_file_stream_t *file_stream = calloc(1, sizeof(*file_stream));
     if(!file_stream) {

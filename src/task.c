@@ -75,6 +75,10 @@ free_task(file_task_t *task) {
   }
   free_paths(task->srcs, task->src_count);
   free_paths(task->extract_destinations, task->src_count);
+  /* NAS 凭据随任务走：用完抹掉，别留在堆里等下一次分配被人扫到。 */
+  if(task->nas_pass[0]) {
+    memset(task->nas_pass, 0, sizeof(task->nas_pass));
+  }
   if(task->password) {
     memset(task->password, 0, strlen(task->password));
     free(task->password);

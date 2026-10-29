@@ -2,11 +2,12 @@
  * same "readable stream + listable directory" interface, so NAS browse / pull /
  * verify / atomic land / resume reuse ONE code path.
  *
- * Adding a backend means implementing the four functions below for that scheme
- * — no other module changes. SMB and NFS are compiled in only when the
- * libraries are vendored (MANGO_HAVE_LIBSMB2 / MANGO_HAVE_LIBNFS); without
- * them transfer_open() returns NULL for that scheme so the caller fails
- * cleanly instead of silently pretending the backend works.
+ * Adding a backend = 新建 src/backend_xxx.c 实现 transfer_backend_t，然后在
+ * 本文件末尾的 g_backends[] 登记一行（详见 docs/ADDING-A-BACKEND.md）。
+ * dispatch 的六个函数里**不许**出现 `if (scheme == ...)`：那是重构前
+ * 「加一个源要改八处」的根源。后端是否存在由注册表决定 —— 没编进来的
+ * 后端不在表里，transfer_scheme_supported() 自然返回 0，不需要
+ * `#if !defined(...)` 那种硬编码清单。
  *
  * The local backend is the reference implementation and is what the host test
  * matrix exercises. The NAS backends connect lazily on first use (mirroring
@@ -19,6 +20,7 @@
  * are absent. Only the connection/IO glue sits behind the HAVE_ guards, and
  * that part is verified on the SDK machine. */
 #include "transfer.h"
+#include "transfer_internal.h"   /* 后端 seam：vtable + 注册表，见该头文件顶部 */
 #include "mango_log.h"
 
 #include <stdio.h>
@@ -251,17 +253,26 @@ static void smb_ra_reset(transfer_src_t *s);
 #include <nfsc/libnfs.h>
 #endif
 
-typedef enum { SCHEME_LOCAL = 0, SCHEME_SMB, SCHEME_NFS } transfer_scheme_t;
+/* wd_rd_t 定义在 transfer_internal.h（那边是唯一一份，避免重复 typedef）。 */
 
+/* 注册表在文件末尾定义；这里先声明 transfer_open 用到的那一项。 */
+static const transfer_backend_t mango_backend_local;
+
+/* transfer_scheme_t 定义在 transfer_internal.h；struct transfer_src 刻意留在
+ * 本文件 —— 后端通过 transfer_ctx_t 看到它需要的字段（url/loc/state/err），
+ * 看不到这个结构体本身，所以新增后端不会撑大它，也不会误用别人的字段。 */
 struct transfer_src {
   transfer_scheme_t scheme;
+  const transfer_backend_t *be;    /* ← dispatch 只认这个 */
+  void                    *be_state; /* 新后端的私有状态 */
   char   path[MANGO_PATH_MAX];
   int    fd;        /* local: lazy, opened on first transfer_read */
   int    opened;
   char   err[256];  /* last backend error, human-readable (smb2/nfs_get_error) */
-#if defined(MANGO_HAVE_LIBSMB2) || defined(MANGO_HAVE_LIBNFS)
+  /* 无条件存在：local 用不到它（保持全 0），但去掉 #if 才能让
+   * transfer_open 里的 "远程才解析 URL" 那段在被裁到只剩 local 的构建里
+   * 也编得过 —— 否则每加/减一个后端都要回来改核心逻辑。 */
   transfer_nas_t nas;   /* filled at transfer_open when scheme != local */
-#endif
 #if defined(MANGO_HAVE_LIBSMB2)
   struct smb2_context *smb2;    /* lazy: connected on first use */
   struct smb2fh       *smb2_fh; /* lazy: file opened on first read */
@@ -287,40 +298,12 @@ transfer_last_error(transfer_src_t *s) {
   return (s && s->err[0]) ? s->err : NULL;
 }
 
-static int
-parse_scheme(const char *scheme) {
-  if(!scheme || !*scheme) return SCHEME_LOCAL;
-  if(!strncmp(scheme, "local", 5)) return SCHEME_LOCAL;
-  if(!strncmp(scheme, "smb", 3))   return SCHEME_SMB;
-  if(!strncmp(scheme, "nfs", 3))   return SCHEME_NFS;
-  return SCHEME_LOCAL; /* unknown -> treat as local */
-}
-
-static int
-scheme_is_known(const char *scheme) {
-  if(!scheme || !*scheme) return 1; /* empty/NULL -> default local */
-  if(!strncmp(scheme, "local", 5)) return 1;
-  if(!strncmp(scheme, "smb", 3))   return 1;
-  if(!strncmp(scheme, "nfs", 3))   return 1;
-  return 0;
-}
+/* 后端注册表在文件末尾（所有 vtable 实例定义之后）；这里只需它的查找入口。 */
+static const transfer_backend_t *find_backend_scheme(const char *scheme);
 
 int
 transfer_scheme_supported(const char *scheme) {
-  int sc = parse_scheme(scheme);
-
-  /* parse_scheme folds unknown schemes into SCHEME_LOCAL (transfer_open's
-   * "unrecognised prefix = local path" contract), but "supported" must not:
-   * an unsupported scheme is a different failure from a bad local path. */
-  if(!scheme_is_known(scheme)) return 0;
-  if(sc == SCHEME_LOCAL) return 1;
-#if defined(MANGO_HAVE_LIBSMB2)
-  if(sc == SCHEME_SMB) return 1;
-#endif
-#if defined(MANGO_HAVE_LIBNFS)
-  if(sc == SCHEME_NFS) return 1;
-#endif
-  return 0; /* known-but-unbuilt backend */
+  return find_backend_scheme(scheme) != NULL;
 }
 
 /* '/' and '\' are interchangeable as path separators here.
@@ -348,8 +331,16 @@ transfer_url_parse(const char *url, transfer_nas_t *out) {
   memset(out, 0, sizeof(*out));
   p = url;
 
-  /* Strip an optional scheme:// prefix (smb://, nfs://) and a leading //. */
-  if(!strncmp(p, "smb://", 6) || !strncmp(p, "nfs://", 6)) p += 6;
+  /* Strip an optional scheme:// prefix (smb://, nfs://, webdav://,
+   * webdav s://) and a leading //. WebDAV URLs are parsed by the same
+   * function as SMB/NFS: the first path segment lands in `share`, the rest in
+   * `path`, and wd_build_path() puts them back together as one HTTP request
+   * path. webdavs/davs 置 out->tls=1 —— TLS 后端按它选传输层。 */
+  if(!strncmp(p, "webdavs://", 10))    { p += 10; out->tls = 1; }
+  else if(!strncmp(p, "davs://", 7))   { p += 7;  out->tls = 1; }
+  else if(!strncmp(p, "webdav://", 9))      p += 9;
+  else if(!strncmp(p, "dav://", 6))    p += 6;
+  else if(!strncmp(p, "smb://", 6) || !strncmp(p, "nfs://", 6)) p += 6;
   if(!strncmp(p, "//", 2)) p += 2;
 
   /* Optional "user[:pass]@" credentials prefix. The server scan below stops at
@@ -418,29 +409,49 @@ transfer_url_parse(const char *url, transfer_nas_t *out) {
   return 1;
 }
 
+/* 把 source 包成后端上下文（定义见文件后半段；这里先声明，open/repoint 要用）。 */
+static transfer_ctx_t mk_ctx(transfer_src_t *s, const char *url);
+
 transfer_src_t *
 transfer_open(const char *scheme, const char *path) {
-  transfer_src_t *s;
-  int             sc = parse_scheme(scheme);
+  transfer_src_t           *s;
+  const transfer_backend_t *be;
+  int                       sc;
 
-  /* Backends not compiled in fail loudly at open time. */
-#if !defined(MANGO_HAVE_LIBSMB2)
-  if(sc == SCHEME_SMB) return NULL;
-#endif
-#if !defined(MANGO_HAVE_LIBNFS)
-  if(sc == SCHEME_NFS) return NULL;
-#endif
+  /* 后端是否存在 = 注册表里有没有它。
+   * 不再写死「哪个 MANGO_HAVE_* 没开就把哪个 scheme 拒掉」——没编进来的
+   * 后端压根不在表里，所以这条规则对现在和以后新增的后端一律适用。 */
+  be = find_backend_scheme(scheme);
+  if(!be) {
+    /* 看起来像远程 URL（带 ://）却没注册：直接失败。把它当本地路径去
+     * stat 只会吐一个莫名其妙的 ENOENT，排查成本远高于当场拒绝。
+     * 不带 :// 的未知前缀仍按历史契约当本地路径。 */
+    if(scheme && strstr(scheme, "://")) return NULL;
+    be = &mango_backend_local;
+  }
   if(!path || !*path) return NULL;
+  sc = be->id;
 
   s = calloc(1, sizeof(*s));
   if(!s) return NULL;
-  s->scheme = sc;
-  s->fd = -1;
-#if defined(MANGO_HAVE_LIBSMB2) || defined(MANGO_HAVE_LIBNFS)
-  if(sc == SCHEME_SMB || sc == SCHEME_NFS) {
+  s->scheme    = sc;
+  s->be        = be;
+  s->fd        = -1;
+
+  /* 远程后端才需要拆 server/share/凭据；local 的 loc 保持 NULL，后端据此
+   * 知道「我拿到的是一段本地路径」。 */
+  if(sc != SCHEME_LOCAL) {
     if(!transfer_url_parse(path, &s->nas)) { free(s); return NULL; }
   }
-#endif
+
+  /* 后端自身的初始化（只置状态，不连网 —— 真机上的连接仍是懒的）。 */
+  if(be->open) {
+    transfer_ctx_t c = { path, (sc != SCHEME_LOCAL) ? &s->nas : NULL,
+                         s->be_state, s->err, sizeof(s->err), s };
+    if(!be->open(&c)) { free(s); return NULL; }
+    s->be_state = c.state;
+  }
+
   strncpy(s->path, path, MANGO_PATH_MAX - 1);
   s->path[MANGO_PATH_MAX - 1] = 0;
   return s;
@@ -453,13 +464,12 @@ int
 transfer_repoint(transfer_src_t *s, const char *path) {
   if(!s || !path || !*path) return 0;
 
-  if(s->scheme == SCHEME_LOCAL) {
+  if(s->be == &mango_backend_local) {
     /* No connection to reuse, but the local fd was opened lazily from the OLD
      * path and would otherwise serve the wrong file. */
     if(s->fd >= 0) { close(s->fd); s->fd = -1; }
     s->opened = 0;
   } else {
-#if defined(MANGO_HAVE_LIBSMB2) || defined(MANGO_HAVE_LIBNFS)
     transfer_nas_t tmp;
 
     if(!transfer_url_parse(path, &tmp)) return 0;
@@ -468,21 +478,17 @@ transfer_repoint(transfer_src_t *s, const char *path) {
      * at another share would read from the wrong one. */
     if(strcmp(s->nas.server, tmp.server) || strcmp(s->nas.share, tmp.share) ||
        strcmp(s->nas.user, tmp.user) || strcmp(s->nas.pass, tmp.pass) ||
-       s->nas.port != tmp.port || s->nas.server_only != tmp.server_only ||
+       s->nas.port != tmp.port || s->nas.tls != tmp.tls ||
+       s->nas.server_only != tmp.server_only ||
        s->nas.server_only) return 0;
     s->nas = tmp;
-#else
-    return 0;   /* backend not compiled in; transfer_open already refused it */
-#endif
-#if defined(MANGO_HAVE_LIBSMB2)
-    /* 换文件 = 换 fh：先作废预读窗口（旧的在途 READ 属于上一个文件，
-       结果必须丢弃），否则会拿到上一份文件的字节。 */
-    smb_ra_reset(s);
-    if(s->smb2_fh) { smb2_close(s->smb2, s->smb2_fh); s->smb2_fh = NULL; }
-#endif
-#if defined(MANGO_HAVE_LIBNFS)
-    if(s->nfs_fh) { nfs_close(s->nfs, s->nfs_fh); s->nfs_fh = NULL; }
-#endif
+    /* 换文件 = 换句柄：让后端自己作废旧句柄/在途请求。
+     * （SMB 还要先作废预读窗口——旧的在途 READ 属于上一个文件，结果必须
+     *   丢弃，否则会拿到上一份文件的字节。） */
+    if(s->be && s->be->repoint) {
+      transfer_ctx_t c = mk_ctx(s, path);
+      s->be->repoint(&c);
+    }
   }
 
   strncpy(s->path, path, MANGO_PATH_MAX - 1);
@@ -491,10 +497,13 @@ transfer_repoint(transfer_src_t *s, const char *path) {
   return 1;
 }
 
-/* Shared list-append used by all three backends. */
-static mango_err_t
-list_push(transfer_entry_t **list, int *n, int *cap,
-          const char *name, uint64_t size, uint64_t mtime, uint32_t mode, int is_dir) {
+/* 所有后端共用的列目录追加器。
+ * 从 static list_push 提出来成为公开符号，是因为 backend_*.c（独立编译
+ * 单元）也要用它 —— 否则每搬一个后端出去就得复制一份 realloc 逻辑。 */
+mango_err_t
+transfer_list_push(transfer_entry_t **list, int *n, int *cap,
+                   const char *name, uint64_t size, uint64_t mtime,
+                   uint32_t mode, int is_dir) {
   size_t nl;
 
   if(*n == *cap) {
@@ -666,7 +675,7 @@ smb_list(transfer_src_t *s, const char *dir,
   }
   while((ent = smb2_readdir(s->smb2, d))) {
     if(!strcmp(ent->name, ".") || !strcmp(ent->name, "..")) continue;
-    rc = list_push(&list, &n, &cap, ent->name,
+    rc = transfer_list_push(&list, &n, &cap, ent->name,
                    (uint64_t)ent->st.smb2_size,
                    (uint64_t)ent->st.smb2_mtime,
                    0,  /* SMB2 stat has no Unix mode bits */
@@ -1275,7 +1284,7 @@ nfsio_list(transfer_src_t *s, const char *dir,
     /* libnfs fills type when the server answers READDIRPLUS; fall back to the
      * mode bits for old servers (NF3DIR == 2 in the NFSv3 protocol). */
     is_dir = ((ent->type == 2) || S_ISDIR(ent->mode)) ? 1 : 0;
-    rc = list_push(&list, &n, &cap, ent->name, (uint64_t)ent->size,
+    rc = transfer_list_push(&list, &n, &cap, ent->name, (uint64_t)ent->size,
                    (uint64_t)ent->mtime.tv_sec, (uint32_t)(ent->mode & 07777), is_dir);
     if(rc != MANGO_OK) { free(list); nfs_closedir(s->nfs, d); return rc; }
   }
@@ -1351,69 +1360,129 @@ nfsio_close(transfer_src_t *s) {
 }
 #endif /* MANGO_HAVE_LIBNFS */
 
+
+/* ==================================================================== *
+ * 后端 adapter:LOCAL
+ *
+ * 以前这段逻辑是内联在 transfer_list()/size()/read() 里的 if 分支——那是
+ * 「local 是特例」的写法，结果每加一个远端后端都要在旁边再插一段 #if。
+ * 现在它和其它后端一样只是表里的一行。
+ *
+ * 它用 c->owner 拿 transfer_src（同文件，允许）；外部 backend_*.c 不要学
+ * 这一手，它们只该用 c->state。
+ * ==================================================================== */
+static mango_err_t
+local_list(transfer_ctx_t *c, const char *dir,
+           transfer_entry_t **out, int *count) {
+  DIR              *d;
+  struct dirent    *ent;
+  transfer_entry_t *list = NULL;
+  int               n = 0, cap = 0;
+  char              base[MANGO_PATH_MAX];
+
+  strncpy(base, dir, sizeof(base) - 1);
+  base[sizeof(base) - 1] = 0;
+  d = opendir(base);
+  if(!d) { transfer_ctx_err(c, "local: cannot open directory"); return MANGO_ERR_NOTFOUND; }
+  while((ent = readdir(d))) {
+    char        full[MANGO_PATH_MAX + 300];
+    struct stat st;
+    mango_err_t rc;
+
+    if(!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) continue;
+    snprintf(full, sizeof(full), "%s/%s", base, ent->d_name);
+    if(stat(full, &st)) continue;
+    rc = transfer_list_push(&list, &n, &cap, ent->d_name,
+                            (uint64_t)st.st_size, (uint64_t)st.st_mtime,
+                            (uint32_t)(st.st_mode & 07777), S_ISDIR(st.st_mode));
+    if(rc != MANGO_OK) { free(list); closedir(d); return rc; }
+  }
+  closedir(d);
+  *out = list;
+  *count = n;
+  return MANGO_OK;
+}
+
+static mango_err_t
+local_size(transfer_ctx_t *c, uint64_t *size) {
+  transfer_src_t *s = (transfer_src_t *)c->owner;
+  struct stat     st;
+
+  if(stat(s->path, &st)) { transfer_ctx_err(c, "local: no such file"); return MANGO_ERR_NOTFOUND; }
+  *size = (uint64_t)st.st_size;
+  return MANGO_OK;
+}
+
+static mango_err_t
+local_remove(transfer_ctx_t *c, const char *path, int is_dir) {
+  (void)c;
+  return (is_dir ? rmdir(path) : unlink(path)) ? MANGO_ERR_GENERIC : MANGO_OK;
+}
+
+static mango_err_t
+local_read(transfer_ctx_t *c, uint64_t offset,
+           void *buf, size_t len, size_t *got) {
+  transfer_src_t *s = (transfer_src_t *)c->owner;
+  ssize_t         n;
+
+  if(!len) return MANGO_OK;
+  if(!s->opened) {
+    s->fd = open(s->path, O_RDONLY
+#ifdef O_BINARY
+                          | O_BINARY
+#endif
+                 );
+    s->opened = 1;
+  }
+  if(s->fd < 0) { transfer_ctx_err(c, "local: cannot open file"); return MANGO_ERR_NOTFOUND; }
+  /* lseek+read rather than pread: pread needs _XOPEN_SOURCE on MinGW and the
+   * payload is single-threaded, so there is no concurrent-offset concern. */
+  if(lseek(s->fd, (off_t)offset, SEEK_SET) < 0) return MANGO_ERR_GENERIC;
+  n = read(s->fd, buf, len);
+  if(n < 0) {
+    if(errno == EINTR) return MANGO_OK;
+    return MANGO_ERR_GENERIC;
+  }
+  *got = (size_t)n;
+  return MANGO_OK; /* n == 0 is clean EOF, not an error */
+}
+
+/* local 没有连接要拆；fd 由 transfer_close 统一收尾（见那里的注释）。 */
+
+/* 把 source 包成后端上下文。state 对 list/read/size 只读，故直接拷贝。 */
+static transfer_ctx_t
+mk_ctx(transfer_src_t *s, const char *url) {
+  transfer_ctx_t c;
+
+  c.url     = url ? url : s->path;
+  c.loc     = (s->scheme != SCHEME_LOCAL) ? &s->nas : NULL;
+  c.state   = s->be_state;
+  c.err     = s->err;
+  c.err_cap = sizeof(s->err);
+  c.owner   = s;
+  return c;
+}
+
 mango_err_t
 transfer_list(transfer_src_t *s, const char *dir,
               transfer_entry_t **out, int *count) {
-  DIR            *d;
-  struct dirent  *ent;
-  transfer_entry_t *list = NULL;
-  int             n = 0, cap = 0;
-  const char     *target;
-  char            base[MANGO_PATH_MAX];
+  transfer_ctx_t c;
 
   if(!s || !out || !count) return MANGO_ERR_GENERIC;
-  target = dir ? dir : s->path;
-  if(s->scheme == SCHEME_LOCAL) {
-    mango_err_t rc;
-
-    strncpy(base, target, sizeof(base) - 1);
-    base[sizeof(base) - 1] = 0;
-    d = opendir(base);
-    if(!d) return MANGO_ERR_NOTFOUND;
-    while((ent = readdir(d))) {
-      char full[MANGO_PATH_MAX + 300];
-      struct stat st;
-
-      if(!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) continue;
-      snprintf(full, sizeof(full), "%s/%s", base, ent->d_name);
-      if(stat(full, &st)) continue;
-      rc = list_push(&list, &n, &cap, ent->d_name,
-                     (uint64_t)st.st_size, (uint64_t)st.st_mtime,
-                     (uint32_t)(st.st_mode & 07777), S_ISDIR(st.st_mode));
-      if(rc != MANGO_OK) { free(list); closedir(d); return rc; }
-    }
-    closedir(d);
-    *out = list;
-    *count = n;
-    return MANGO_OK;
-  }
-#if defined(MANGO_HAVE_LIBSMB2)
-  if(s->scheme == SCHEME_SMB) return smb_list(s, dir, out, count);
-#endif
-#if defined(MANGO_HAVE_LIBNFS)
-  if(s->scheme == SCHEME_NFS) return nfsio_list(s, dir, out, count);
-#endif
-  return MANGO_ERR_UNSUPPORTED;
+  if(!s->be || !s->be->list) return MANGO_ERR_UNSUPPORTED;
+  c = mk_ctx(s, dir);
+  return s->be->list(&c, dir ? dir : s->path, out, count);
 }
 
 mango_err_t
 transfer_size(transfer_src_t *s, uint64_t *size) {
-  struct stat st;
+  transfer_ctx_t c;
 
   if(!s || !size) return MANGO_ERR_GENERIC;
   *size = 0;
-  if(s->scheme == SCHEME_LOCAL) {
-    if(stat(s->path, &st)) return MANGO_ERR_NOTFOUND;
-    *size = (uint64_t)st.st_size;
-    return MANGO_OK;
-  }
-#if defined(MANGO_HAVE_LIBSMB2)
-  if(s->scheme == SCHEME_SMB) return smb_size(s, size);
-#endif
-#if defined(MANGO_HAVE_LIBNFS)
-  if(s->scheme == SCHEME_NFS) return nfsio_size(s, size);
-#endif
-  return MANGO_ERR_UNSUPPORTED;
+  if(!s->be || !s->be->size) return MANGO_ERR_UNSUPPORTED;
+  c = mk_ctx(s, NULL);
+  return s->be->size(&c, size);
 }
 
 /* 删除远端的一个条目。is_dir 由调用方从列目录结果里带过来（我们**知道**它是
@@ -1422,16 +1491,11 @@ transfer_size(transfer_src_t *s, uint64_t *size) {
 mango_err_t
 transfer_remove(transfer_src_t *s, const char *path, int is_dir) {
   if(!s || !path) return MANGO_ERR_GENERIC;
-  if(s->scheme == SCHEME_LOCAL)
-    return (is_dir ? rmdir(path) : unlink(path)) ? MANGO_ERR_GENERIC
-                                                 : MANGO_OK;
-#if defined(MANGO_HAVE_LIBSMB2)
-  if(s->scheme == SCHEME_SMB) return smb_remove(s, path, is_dir);
-#endif
-#if defined(MANGO_HAVE_LIBNFS)
-  if(s->scheme == SCHEME_NFS) return nfsio_remove(s, path, is_dir);
-#endif
-  return MANGO_ERR_UNSUPPORTED;
+  if(!s->be || !s->be->remove) return MANGO_ERR_UNSUPPORTED;
+  {
+    transfer_ctx_t c = mk_ctx(s, path);
+    return s->be->remove(&c, path, is_dir);
+  }
 }
 
 /* Recommended per-call read size; see transfer.h for why this exists.
@@ -1446,14 +1510,13 @@ transfer_read_chunk(transfer_src_t *s) {
   size_t chunk = TRANSFER_CHUNK_FLOOR;
 
   if(!s) return TRANSFER_CHUNK_FLOOR;
-#if defined(MANGO_HAVE_LIBSMB2)
-  if(s->scheme == SCHEME_SMB && s->smb2) {
-    uint32_t mx = smb2_get_max_read_size(s->smb2);
-    if(mx >= 4096) chunk = (size_t)mx;
+  /* 后端能协商出更大的块就听它的（目前只有 SMB 会）；协商不出就用地板值。
+   * NFS 没有协商上限，地板值同时是 NFSv3 单次 READ 的协议上限。 */
+  if(s->be && s->be->chunk) {
+    transfer_ctx_t c = mk_ctx(s, NULL);
+    size_t offered = s->be->chunk(&c);
+    if(offered >= 4096) chunk = offered;
   }
-#endif
-  /* NFS: libnfs exposes no negotiated read ceiling; the floor (1 MB) is also
-   * the NFSv3 protocol's own per-READ maximum, so it is the right value. */
   if(chunk > TRANSFER_CHUNK_CAP) chunk = TRANSFER_CHUNK_CAP;
   return chunk;
 }
@@ -1461,52 +1524,176 @@ transfer_read_chunk(transfer_src_t *s) {
 mango_err_t
 transfer_read(transfer_src_t *s, uint64_t offset,
               void *buf, size_t len, size_t *got) {
-  ssize_t n;
+  transfer_ctx_t c;
 
   if(!s || !buf || !got) return MANGO_ERR_GENERIC;
   *got = 0;
-  if(s->scheme == SCHEME_LOCAL) {
-    if(!len) return MANGO_OK;
-    if(!s->opened) {
-      s->fd = open(s->path, O_RDONLY
-#ifdef O_BINARY
-                            | O_BINARY
-#endif
-                   );
-      s->opened = 1;
-    }
-    if(s->fd < 0) return MANGO_ERR_NOTFOUND;
-    /* lseek+read rather than pread: pread needs _XOPEN_SOURCE on MinGW and the
-     * payload is single-threaded, so there is no concurrent-offset concern. */
-    if(lseek(s->fd, (off_t)offset, SEEK_SET) < 0) return MANGO_ERR_GENERIC;
-    n = read(s->fd, buf, len);
-    if(n < 0) {
-      if(errno == EINTR) return MANGO_OK;
-      return MANGO_ERR_GENERIC;
-    }
-    *got = (size_t)n;
-    return MANGO_OK; /* n == 0 is clean EOF, not an error */
-  }
-#if defined(MANGO_HAVE_LIBSMB2)
-  if(s->scheme == SCHEME_SMB) return smb_read(s, offset, buf, len, got);
-#endif
-#if defined(MANGO_HAVE_LIBNFS)
-  if(s->scheme == SCHEME_NFS) return nfsio_read(s, offset, buf, len, got);
-#endif
-  return MANGO_ERR_UNSUPPORTED;
+  if(!s->be || !s->be->read) return MANGO_ERR_UNSUPPORTED;
+  c = mk_ctx(s, NULL);
+  return s->be->read(&c, offset, buf, len, got);
 }
 
 void
 transfer_close(transfer_src_t *s) {
   if(!s) return;
-  if(s->scheme == SCHEME_LOCAL) {
-    if(s->fd >= 0) close(s->fd);
+  if(s->be) {
+    if(s->be->close) {
+      transfer_ctx_t c = mk_ctx(s, NULL);
+      s->be->close(&c);
+      s->be_state = c.state;   /* close 可以清空它 */
+    }
   }
+  /* local 的 fd 不属于任何后端的连接状态，历史上由这里统一收尾；
+   * 保留在工作，避免动到已验证的 local 打开/关闭时序。 */
+  if(s->fd >= 0) { close(s->fd); s->fd = -1; }
+  free(s);
+}
+
+/* ==================================================================== *
+ * 后端注册表 —— 整个 seam 唯二需要「每加一个后端改一下」的地方
+ * （另一个是 Makefile 的 SRCS）。
+ *
+ * 注意：这里只登记**本次构建真的编进来**的后端。没编进来的就不在表里，
+ * 于是 transfer_scheme_supported() 自然返回 0、transfer_open() 自然拒绝
+ * —— 不再需要 #if !defined(...) 那种「哪个宏没开就拒哪个 scheme」的
+ * 硬编码清单。
+ * ==================================================================== */
+
+/* ---- local ---- */
+static const char *const local_schemes[] = { "local", NULL };
+
+static const transfer_backend_t mango_backend_local = {
+  "local", SCHEME_LOCAL, local_schemes,
+  NULL, NULL, NULL,               /* 无连接、无拆连接、无每文件句柄 */
+  local_list, local_size, local_remove, local_read, NULL
+};
+
 #if defined(MANGO_HAVE_LIBSMB2)
-  if(s->scheme == SCHEME_SMB) smb_close(s);
+/* ---- smb ----
+ * 薄转发：真正的实现仍是上面那些 smb_* 函数（预读窗口、NTLM 双试等逻辑
+ * 一行没动）。等这些函数搬去 src/backend_smb.c 时，把 owner 换成
+ * c->state 即可 —— seam 本身不用变。 */
+static const char *const smb_schemes[] = { "smb", NULL };
+
+static int
+smb_be_open(transfer_ctx_t *c) { (void)c; return 1; }   /* 懒连接，见文件头 */
+static void
+smb_be_close(transfer_ctx_t *c) { smb_close((transfer_src_t *)c->owner); }
+static mango_err_t
+smb_be_list(transfer_ctx_t *c, const char *d, transfer_entry_t **o, int *n)
+{ return smb_list((transfer_src_t *)c->owner, d, o, n); }
+static mango_err_t
+smb_be_size(transfer_ctx_t *c, uint64_t *sz)
+{ return smb_size((transfer_src_t *)c->owner, sz); }
+static mango_err_t
+smb_be_remove(transfer_ctx_t *c, const char *p, int is_dir)
+{ return smb_remove((transfer_src_t *)c->owner, p, is_dir); }
+static mango_err_t
+smb_be_read(transfer_ctx_t *c, uint64_t off, void *b, size_t l, size_t *g)
+{ return smb_read((transfer_src_t *)c->owner, off, b, l, g); }
+static void
+smb_be_repoint(transfer_ctx_t *c) {
+  transfer_src_t *s = (transfer_src_t *)c->owner;
+
+  /* 换文件 = 换 fh：先作废预读窗口（旧的在途 READ 属于上一个文件，
+     结果必须丢弃），否则会拿到上一份文件的字节。 */
+  smb_ra_reset(s);
+  if(s->smb2_fh) { smb2_close(s->smb2, s->smb2_fh); s->smb2_fh = NULL; }
+}
+static size_t
+smb_be_chunk(transfer_ctx_t *c) {
+  transfer_src_t *s = (transfer_src_t *)c->owner;
+  if(s->smb2) {
+    uint32_t mx = smb2_get_max_read_size(s->smb2);
+    if(mx >= 4096) return (size_t)mx;
+  }
+  return 0;
+}
+
+static const transfer_backend_t mango_backend_smb = {
+  "smb", SCHEME_SMB, smb_schemes,
+  smb_be_open, smb_be_close, smb_be_repoint,
+  smb_be_list, smb_be_size, smb_be_remove, smb_be_read, smb_be_chunk
+};
+#endif /* MANGO_HAVE_LIBSMB2 */
+
+#if defined(MANGO_HAVE_LIBNFS)
+/* ---- nfs ---- */
+static const char *const nfs_schemes[] = { "nfs", NULL };
+
+static int
+nfs_be_open(transfer_ctx_t *c) { (void)c; return 1; }   /* 懒挂载 */
+static void
+nfs_be_close(transfer_ctx_t *c) { nfsio_close((transfer_src_t *)c->owner); }
+static mango_err_t
+nfs_be_list(transfer_ctx_t *c, const char *d, transfer_entry_t **o, int *n)
+{ return nfsio_list((transfer_src_t *)c->owner, d, o, n); }
+static mango_err_t
+nfs_be_size(transfer_ctx_t *c, uint64_t *sz)
+{ return nfsio_size((transfer_src_t *)c->owner, sz); }
+static mango_err_t
+nfs_be_remove(transfer_ctx_t *c, const char *p, int is_dir)
+{ return nfsio_remove((transfer_src_t *)c->owner, p, is_dir); }
+static mango_err_t
+nfs_be_read(transfer_ctx_t *c, uint64_t off, void *b, size_t l, size_t *g)
+{ return nfsio_read((transfer_src_t *)c->owner, off, b, l, g); }
+static void
+nfs_be_repoint(transfer_ctx_t *c) {
+  transfer_src_t *s = (transfer_src_t *)c->owner;
+
+  if(s->nfs_fh) { nfs_close(s->nfs, s->nfs_fh); s->nfs_fh = NULL; }
+}
+/* 无协商上限 -> 返回 0 让 transfer_read_chunk 用 1 MB 地板（也是 NFSv3
+ * 单次 READ 的协议上限）。 */
+
+static const transfer_backend_t mango_backend_nfs = {
+  "nfs", SCHEME_NFS, nfs_schemes,
+  nfs_be_open, nfs_be_close, nfs_be_repoint,
+  nfs_be_list, nfs_be_size, nfs_be_remove, nfs_be_read, NULL
+};
+#endif /* MANGO_HAVE_LIBNFS */
+
+#if defined(MANGO_HAVE_WEBDAV)
+/* ---- webdav（独立编译单元 src/backend_webdav.c）----
+ * vtable 实现整体搬出本文件，这里只留声明。
+ * v1.0.8：云盘后端（backend_cloud.c）随云盘功能一并移除，本文件不再牵
+ * cloud_drive/cloud_net/mbedTLS 那条链。 */
+extern const transfer_backend_t mango_backend_webdav;
+#endif /* MANGO_HAVE_WEBDAV */
+
+static const transfer_backend_t *const g_backends[] = {
+  &mango_backend_local,
+#if defined(MANGO_HAVE_LIBSMB2)
+  &mango_backend_smb,
 #endif
 #if defined(MANGO_HAVE_LIBNFS)
-  if(s->scheme == SCHEME_NFS) nfsio_close(s);
+  &mango_backend_nfs,
 #endif
-  free(s);
+#if defined(MANGO_HAVE_WEBDAV)
+  &mango_backend_webdav,
+#endif
+};
+
+/* scheme 字符串 -> 后端。NULL 表示「没注册这个 scheme」。
+ *
+ * 最长前缀匹配（而不是精确相等）是为了保住历史行为："webdav" 先于
+ * "dav" 命中，且 "smb://host" 这种带前缀的写法照样认。空串/NULL 视为
+ * local —— 这是 transfer_open 的老契约（不带 scheme 的路径就是本地路径）。 */
+static const transfer_backend_t *
+find_backend_scheme(const char *scheme) {
+  const transfer_backend_t *hit = NULL;
+  size_t                    best = 0, i;
+
+  if(!scheme || !*scheme) return &mango_backend_local;
+  for(i = 0; i < sizeof(g_backends) / sizeof(g_backends[0]); i++) {
+    const transfer_backend_t *be = g_backends[i];
+    const char *const        *al;
+
+    if(!be || !be->schemes) continue;
+    for(al = be->schemes; *al; al++) {
+      size_t n = strlen(*al);
+      if(n > best && !strncmp(scheme, *al, n)) { best = n; hit = be; }
+    }
+  }
+  return hit;
 }

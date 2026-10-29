@@ -48,6 +48,16 @@ typedef struct file_task {
   char error_arg[PATH_MAX + 96];
   char **srcs;
   size_t src_count;
+  /* v1.0.9：下载/播放任务的 NAS 作用域。nas_scheme 为空 ⇒ 本地路径。
+   * 为什么存在：/api/download/prepare 当年对每个 path 做 lstat()，而 NAS 的
+   * path 是 host/share/x —— 本地 lstat 必然 ENOENT，用户看到的就是
+   * 「下载失败：file not found」。作用域必须随任务活到 GET /api/download
+   * 那一刻（后端要拿它拼共享地址），所以只能挂在任务上。 */
+  char nas_scheme[16];
+  char nas_user[128];
+  char nas_pass[128];
+  char nas_port[16];
+  unsigned long long nas_size;
   char *password;
   char **extract_destinations;
   size_t file_count;
@@ -186,12 +196,20 @@ enum MHD_Result api_download_prepare(struct MHD_Connection *conn,
 enum MHD_Result api_download(struct MHD_Connection *conn);
 enum MHD_Result api_list(struct MHD_Connection *conn, const char *body,
                          size_t body_size);
+/* list.c 里拼 NAS URL 的唯一实现：/api/fs/list 与 /api/fs/read 都用它，
+ * 免得两处对「凭据怎么写进 URL」各有一套口径。 */
+void nas_build_url(const char *path, const char *user, const char *pass,
+                   const char *port, const char *scheme, char *out,
+                   size_t out_size);
 enum MHD_Result api_space(struct MHD_Connection *conn, const char *body,
                           size_t body_size);
 enum MHD_Result api_tasks(struct MHD_Connection *conn, const char *body,
                           size_t body_size);
 enum MHD_Result api_text(struct MHD_Connection *conn, const char *body,
                          size_t body_size);
+/* 二进制出口（图片预览流式取字节，不走 base64，因此不受 4 MiB cap 限制）。 */
+enum MHD_Result api_fs_raw(struct MHD_Connection *conn, const char *body,
+                           size_t body_size);
 enum MHD_Result api_text_create(struct MHD_Connection *conn,
                                 const char *body, size_t body_size);
 enum MHD_Result api_text_save(struct MHD_Connection *conn, const char *body,

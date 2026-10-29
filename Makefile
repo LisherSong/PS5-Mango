@@ -26,7 +26,7 @@ endif
 # hosttest "api/status reports the Makefile's VERSION_TAG" check caught it).
 # The VSTAMP prerequisite on the src/ object rules below forces those objects
 # to recompile on every version change.
-VERSION_TAG := v1.0
+VERSION_TAG := v1.1
 # ⚠️ TITLE_ID MUST match "titleId" in assets/param.json. app_installer.c uses
 # TITLE_ID to create /user/app/<id>, but the PS5 launcher reads the title id out
 # of the param.json we drop beside it; if they disagree the app is installed
@@ -41,6 +41,9 @@ HOST_STRIP  ?= strip
 HOST_PKG_CONFIG ?= pkg-config
 # Set NAS=0 to drop the vendored SMB/NFS backends (see below).
 NAS         ?= 1
+# WebDAV is self-contained (plain HTTP/1.1 written in src/transfer.c): no
+# vendored library, no TLS. Set WEBDAV=0 to compile the scheme out.
+WEBDAV      ?= 1
 
 # ---------------------------------------------------------------- program name
 # ⚠️ The version goes in $(BIN) and deliberately NOT in PROCESS_NAME (src/main.c).
@@ -55,9 +58,11 @@ NAS         ?= 1
 BIN        := PS5-Mango-$(VERSION_TAG).elf
 LINUX_BIN  := PS5-Mango-linux-$(VERSION_TAG)
 COMMON_SRCS := src/main.c src/websrv.c src/filemgr.c src/file_response.c src/task.c \
-  src/upload.c src/download.c src/text.c src/list.c src/space.c src/fs_util.c \
-  src/json_util.c src/path_util.c src/asset.c src/mime.c src/notify.c \
+  src/upload.c src/download.c src/text.c src/list.c src/nas_addr.c src/space.c \
+  src/fs_util.c src/json_util.c src/path_util.c src/asset.c src/mime.c \
+  src/notify.c \
   src/mango_log.c src/pkg_installer.c src/pkg_info.c src/mango_port.c \
+  src/readsrc.c \
   src/pkg_stream.c src/save_domain.c src/transfer.c src/archive_extract.c \
   src/elfldr.c src/savemgr.c src/zip_write.c
 PS5_SRCS    := $(COMMON_SRCS) src/app_installer.c src/cpu_support_stub.c
@@ -126,9 +131,28 @@ LINUX_OBJDIR   := $(MANGO_BUILD_ROOT)/linux-obj
 # libsmb2's lib/*.c do `#include "smb2.h"` / "libsmb2-private.h", which live in
 # include/smb2 -- hence the second -I. _U_ is upstream's unused-parameter
 # annotation, defined so the vendor code compiles without us editing it.
+# ── vendor TU section granularity ────────────────────────────────────────────
+# ⚠️ MEASURED, NOT ASSUMED (v1.0, 2026-10-24): adding -ffunction-sections /
+# -fdata-sections to the vendor TUs did NOT shrink .text (960 bytes total).
+# sqlite3.o's 691 KB survives --gc-sections almost intact because sqlite's
+# internal call graph is dense -- every function is reachable from the entry
+# points we do use. The flags stay because they are free and they make future
+# trimming possible, but do not expect .text to drop from them.
+#
+# The real win is -fno-asynchronous-unwind-tables -fno-unwind-tables: nothing
+# in this payload unwinds through a C frame, so the vendor C TUs' .eh_frame and
+# its index were pure dead weight. Measured on the whole payload:
+#   .eh_frame      147,268 -> 39,524   (-107,744)
+#   .eh_frame_hdr   31,196 ->  8,012   ( -23,184)
+#   ELF total    2,588,208 -> 2,457,136 (-131,072, -5.1%)
+# NOTE: unrar is C++ and is handled separately below -- its unwind tables are
+# part of the ABI it was compiled against, so it does NOT take this flag.
+TP_SECTION_FLAGS := -ffunction-sections -fdata-sections \
+  -fno-asynchronous-unwind-tables -fno-unwind-tables
+
 SMB_TP_FLAGS := -Os -w -Ithird_party/libsmb2 -Ithird_party/libsmb2/include \
   -Ithird_party/libsmb2/include/smb2 -DHAVE_CONFIG_H \
-  "-D_U_=__attribute__((unused))"
+  "-D_U_=__attribute__((unused))" $(TP_SECTION_FLAGS)
 # libnfs's generated rpcgen headers (libnfs-raw-*.h) sit next to their TUs in the
 # mount/nfs/nfs4/nlm/nsm/portmap/rquota dirs, not in include/ -- upstream's
 # lib/Makefile.am adds one -I per dir, and so do we.
@@ -137,7 +161,7 @@ NFS_TP_FLAGS := -Os -w -Ithird_party/libnfs -Ithird_party/libnfs/include \
   -Ithird_party/libnfs/nfs -Ithird_party/libnfs/nfs4 -Ithird_party/libnfs/nlm \
   -Ithird_party/libnfs/nsm -Ithird_party/libnfs/portmap \
   -Ithird_party/libnfs/rquota -DHAVE_CONFIG_H \
-  "-D_U_=__attribute__((unused))"
+  "-D_U_=__attribute__((unused))" $(TP_SECTION_FLAGS)
 
 ifeq ($(NAS),1)
 TP_SRCS := $(wildcard third_party/libsmb2/lib/*.c) \
@@ -197,9 +221,20 @@ ARCH_TP_C_SRCS := $(wildcard third_party/zlib/src/*.c) \
 SQLITE_SRCS := third_party/sqlite3/sqlite3.c
 SQLITE_TP_FLAGS := -Os -w -Ithird_party/sqlite3 -DSQLITE_OMIT_LOAD_EXTENSION \
   -DSQLITE_OMIT_DEPRECATED -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_EXPLAIN \
-  -DSQLITE_OMIT_AUTHORIZATION -DSQLITE_OMIT_UTF16
+  -DSQLITE_OMIT_AUTHORIZATION -DSQLITE_OMIT_UTF16 $(TP_SECTION_FLAGS)
 PS5_SQLITE_OBJS   := $(patsubst %.c,$(PS5_OBJDIR)/%.o,$(SQLITE_SRCS))
 LINUX_SQLITE_OBJS := $(patsubst %.c,$(LINUX_OBJDIR)/%.o,$(SQLITE_SRCS))
+
+# ------------------------------------------------ cJSON (vendored, MIT, 1.7.19)
+# JSON 解析器：云盘驱动（P3）解析四家网盘 API 响应。项目自带的
+# src/json_util.c 只有 strbuf + json_escape（序列化侧），无解析能力。
+# 单文件零依赖，两平台同源编译；选取记录见 third_party/cjson/VENDORED.md
+# （2026-10-25，用户规矩「遇问题先查 GitHub」后选定）。上游代码未改，
+# -w 放松告警（与 sqlite3/smb2 同款 vendor 纪律）。
+CJSON_SRCS := third_party/cjson/cJSON.c
+CJSON_TP_FLAGS := -Os -w -Ithird_party/cjson $(TP_SECTION_FLAGS)
+PS5_CJSON_OBJS   := $(patsubst %.c,$(PS5_OBJDIR)/%.o,$(CJSON_SRCS))
+LINUX_CJSON_OBJS := $(patsubst %.c,$(LINUX_OBJDIR)/%.o,$(CJSON_SRCS))
 
 # AesOpt.c hard-codes x86 AES-NI / AVX / VAES intrinsics (PS5 is Zen 2: all
 # present). HAVE_WZAES / HAVE_PKCRYPT switch on minizip-ng's two ZIP
@@ -207,9 +242,14 @@ LINUX_SQLITE_OBJS := $(patsubst %.c,$(LINUX_OBJDIR)/%.o,$(SQLITE_SRCS))
 ARCH_C_FLAGS := -Os -w -Isrc -Ithird_party/unrar7 -Ithird_party/zlib/include \
   -Ithird_party/minizip-ng/include -Ithird_party/7z \
   -DHAVE_ZLIB -DZLIB_COMPAT -DHAVE_UNISTD_H=1 -D_FILE_OFFSET_BITS=64 \
-  -D_LARGEFILE64_SOURCE -DHAVE_FSEEKO -DZ7_PPMD_SUPPORT -DHAVE_WZAES -DHAVE_PKCRYPT
+  -D_LARGEFILE64_SOURCE -DHAVE_FSEEKO -DZ7_PPMD_SUPPORT -DHAVE_WZAES -DHAVE_PKCRYPT \
+  $(TP_SECTION_FLAGS)
 ARCH_C_FLAGS_7Z := $(ARCH_C_FLAGS) -maes -mavx2 -mvaes
-UNRAR7_CXX_FLAGS      := -Os -w -std=c++17 -DRARDLL -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
+# unrar is C++, so it keeps its unwind tables (exceptions are part of the ABI it
+# was written against); only the section granularity applies, so gc-sections can
+# drop the unrar entry points we never call.
+UNRAR7_CXX_FLAGS      := -Os -w -std=c++17 -DRARDLL -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
+  -ffunction-sections -fdata-sections
 # prospero-clang++ defaults to -stdlib=libc++; state it explicitly for clarity.
 UNRAR7_CXX_FLAGS_PS5  := $(UNRAR7_CXX_FLAGS) -stdlib=libc++
 UNRAR7_CXX_FLAGS_HOST := $(UNRAR7_CXX_FLAGS)
@@ -226,7 +266,12 @@ LINUX_TP_OBJS  := $(patsubst %.c,$(LINUX_OBJDIR)/%.o,$(TP_SRCS))
 
 CFLAGS := -Oz -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Werror -ffunction-sections -fdata-sections -Isrc -Ithird_party/sqlite3 -Ithird_party/minizip-ng/include -Ithird_party/zlib/include -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
 CFLAGS += `$(PKG_CONFIG) libmicrohttpd --cflags`
-LDFLAGS := -Wl,--gc-sections
+# --icf=all folds identical code. Measured -32 KB on the pre-TP_SECTION_FLAGS
+# payload; once the vendor TUs also get -ffunction-sections that gain is gone
+# (gc-sections reaches the same duplicates first, 0 bytes measured on 2026-10-24).
+# Kept because it costs nothing and re-applies if the section layout changes.
+# --icf=safe is NOT usable here: ld.lld ignores it for crt1.o (no SHT_LLVM_ADDRSIG).
+LDFLAGS := -Wl,--gc-sections -Wl,--icf=all
 LDADD  := `$(PKG_CONFIG) libmicrohttpd --libs`
 # ⚠️ NO -lSceIpmi / -lSceAppInstUtil here: AppInstUtil must be dlopen'd at
 # runtime (Ipmi first) — statically linking it killed the payload on install
@@ -247,6 +292,57 @@ CFLAGS       += -DMANGO_HAVE_LIBSMB2 -Ithird_party/libsmb2/include
 CFLAGS       += -DMANGO_HAVE_LIBNFS -Ithird_party/libnfs/include -Ithird_party/libnfs/include/nfsc
 LINUX_CFLAGS += -DMANGO_HAVE_LIBSMB2 -Ithird_party/libsmb2/include
 LINUX_CFLAGS += -DMANGO_HAVE_LIBNFS -Ithird_party/libnfs/include -Ithird_party/libnfs/include/nfsc
+endif
+
+# WebDAV: the backend lives in its own TU (src/backend_webdav.c) since the
+# 2026-10-27 backend split; the macro still has to sit AFTER the base ':='
+# assignments for the same reason as above.
+ifeq ($(WEBDAV),1)
+CFLAGS       += -DMANGO_HAVE_WEBDAV
+LINUX_CFLAGS += -DMANGO_HAVE_WEBDAV
+PS5_SRCS    += src/backend_webdav.c
+LINUX_SRCS  += src/backend_webdav.c
+endif
+
+# ------------------------------------------- mbedTLS（只服务 WebDAV 的 https）
+# v1.0.8（2026-10-27）：云盘（阿里/百度/夸克）整条链移除后，mbedTLS 在链上
+# 的唯一用途是 `webdavs://`（WebDAV over TLS）。它原先挂在 CLOUD_NET 下
+# （云盘网络底座 cloud_net.c），一并拆开、改名 MBTLS：
+#   · 云盘那套 DNS/TLS/HTTP 底座（cloud_net.c）与 121 证 CA bundle
+#     （cloud_cacert.c，cacert.pem 182,140 B）一起下链 —— WebDAV 的 TLS
+#     策略是 VERIFY_NONE（要能连自签的飞牛/群晖），本就不需要信任链，
+#     这两个 TU 是纯负担，删掉直接省约 180 KB。
+#   · 宏改名 -DMANGO_HAVE_MBEDTLS：backend_webdav.c 的 WD_HAVE_TLS 由
+#     「MANGO_HAVE_WEBDAV && MANGO_HAVE_CLOUD」改为与它组合——原写法会把
+#     webdavs 跟云盘绑死（砍云盘即砍 https），那正是这次要避免的连带损伤。
+# third_party/mbedtls 由 tools/build-mbedtls.sh 交叉构建（PS5LM 配方：
+# prospero-cmake -G Ninja + MBEDTLS_THREADING_C/PTHREAD），5 个静态库。
+# ⚠️ 静态库链接顺序 mbedtls -> x509 -> crypto -> p256m -> everest（符号依赖序）。
+# 宿主机 cc 可直接链这套 prospero 产物（2026-10-25 实测：x86-64 调用约定
+# 一致，libc 符号由 glibc 侧解析），故 LINUX 与 PS5 共用同一套 .a。
+# Set MBTLS=0 to compile TLS out (webdavs:// then fails with a clear error).
+MBTLS ?= 1
+MBT_LIB   := third_party/mbedtls/lib
+MBT_LIBS  := $(MBT_LIB)/libmbedtls.a $(MBT_LIB)/libmbedx509.a \
+             $(MBT_LIB)/libmbedcrypto.a $(MBT_LIB)/libp256m.a \
+             $(MBT_LIB)/libeverest.a
+# 宿主机 cc 无法直接链 PS5（newlib）产物：prospero-clang 展开出的
+# __error / __isthreaded / __inet_pton / sysctl（entropy 的 BSD 分支）
+# 在 glibc 侧没有对应物，defsym 补不干净。故 LINUX 侧用
+# third_party/mbedtls/lib-host（MBEDTLS_HOST=1 tools/build-mbedtls.sh
+# 构建：__linux__ 分支走 getrandom，符号干净）。
+ifeq ($(MBTLS),1)
+# MANGO_HAVE_MBEDTLS：告诉 backend_webdav.c「TLS 可用」。宏在这里而不是让
+# 它自己猜——它只需要「mbedtls 在不在链上」这一位信息。
+CFLAGS       += -DMANGO_HAVE_MBEDTLS -Ithird_party/mbedtls/include
+LINUX_CFLAGS += -DMANGO_HAVE_MBEDTLS -Ithird_party/mbedtls/include
+LDADD        += $(MBT_LIBS)
+LINUX_MBT_LIBS := $(patsubst $(MBT_LIB)/%,$(MBT_LIB)-host/%,$(MBT_LIBS))
+ifeq ($(wildcard $(MBT_LIB)-host/libmbedtls.a),)
+$(warning mbedtls: third_party/mbedtls/lib-host missing; run \
+  MBEDTLS_HOST=1 tools/build-mbedtls.sh (WSL) before 'make linux')
+endif
+LINUX_LDADD  += $(LINUX_MBT_LIBS)
 endif
 
 .PHONY: all linux deps linux-deps clean test test-guards test-host test-frontend
@@ -289,6 +385,10 @@ linux-deps:
 gen:
 	mkdir gen
 
+# ⚠️ Compiler flags are NOT in any .o's dependency graph -- make only compares
+# source mtimes. After changing a vendor flag (TP_SECTION_FLAGS, SQLITE_TP_FLAGS,
+# ARCH_C_FLAGS ...) you MUST run this, or the link silently reuses objects built
+# with the old flags and the size win disappears with no error to tell you.
 clean:
 	rm -rf $(BIN) $(LINUX_BIN) gen $(PS5_OBJDIR) $(LINUX_OBJDIR)
 
@@ -404,14 +504,23 @@ $(LINUX_OBJDIR)/third_party/sqlite3/%.o: third_party/sqlite3/%.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(SQLITE_TP_FLAGS) -c -o $@ $<
 
+$(PS5_OBJDIR)/third_party/cjson/%.o: third_party/cjson/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CJSON_TP_FLAGS) -c -o $@ $<
+$(LINUX_OBJDIR)/third_party/cjson/%.o: third_party/cjson/%.c
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(CJSON_TP_FLAGS) -c -o $@ $<
+
 # Link with the C++ driver so libc++ (PS5) / libstdc++ (host) comes in for the
 # unrar objects. Every TU is pre-built into its objdir with its OWN flag set --
 # nothing is compiled inside the link command any more, so the driver language
 # mixups that -x c/-x none used to paper over cannot happen.
-$(BIN): $(PS5_MAIN_OBJS) $(PS5_TP_OBJS) $(PS5_ARCH_OBJS) $(PS5_SQLITE_OBJS)
-	$(CXX) $(CFLAGS) $(LDFLAGS) -o $@ $(PS5_MAIN_OBJS) $(PS5_TP_OBJS) $(PS5_ARCH_OBJS) $(PS5_SQLITE_OBJS) $(LDADD) -lSceFsInternalForVsh -lSceRegMgr
+# cJSON 无调用方时同样被 --gc-sections 整对象裁掉（与 mbedtls
+# 同策略：先接基建，P3 驱动开工时零 Makefile 改动）。
+$(BIN): $(PS5_MAIN_OBJS) $(PS5_TP_OBJS) $(PS5_ARCH_OBJS) $(PS5_SQLITE_OBJS) $(PS5_CJSON_OBJS)
+	$(CXX) $(CFLAGS) $(LDFLAGS) -o $@ $(PS5_MAIN_OBJS) $(PS5_TP_OBJS) $(PS5_ARCH_OBJS) $(PS5_SQLITE_OBJS) $(PS5_CJSON_OBJS) $(LDADD) -lSceFsInternalForVsh -lSceRegMgr
 	$(STRIP) $@
 
-$(LINUX_BIN): $(LINUX_MAIN_OBJS) $(LINUX_TP_OBJS) $(LINUX_ARCH_OBJS) $(LINUX_SQLITE_OBJS)
-	$(HOST_CXX) $(LINUX_CFLAGS) -o $@ $(LINUX_MAIN_OBJS) $(LINUX_TP_OBJS) $(LINUX_ARCH_OBJS) $(LINUX_SQLITE_OBJS) $(LINUX_LDADD)
+$(LINUX_BIN): $(LINUX_MAIN_OBJS) $(LINUX_TP_OBJS) $(LINUX_ARCH_OBJS) $(LINUX_SQLITE_OBJS) $(LINUX_CJSON_OBJS)
+	$(HOST_CXX) $(LINUX_CFLAGS) -o $@ $(LINUX_MAIN_OBJS) $(LINUX_TP_OBJS) $(LINUX_ARCH_OBJS) $(LINUX_SQLITE_OBJS) $(LINUX_CJSON_OBJS) $(LINUX_LDADD)
 	$(HOST_STRIP) $@

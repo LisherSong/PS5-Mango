@@ -367,10 +367,16 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   display:flex;flex-direction:column;gap:10px;transition:border-color .18s,background .18s,transform .18s}
 .gcard:hover{border-color:var(--line-2);background:var(--s2);transform:translateY(-2px)}
 .gcard:focus-visible{outline:none;box-shadow:0 0 0 2px var(--brand),0 0 0 4px var(--brand-soft)}
-.cover{position:relative;aspect-ratio:3/4;border-radius:12px;overflow:hidden;display:grid;place-items:center;
+/* 封面 3:4 —— ⚠️ 不能用 aspect-ratio：PS5 的 WebKit（Safari 14 一代——认 inset 但不认
+   aspect-ratio）会整条丢弃该声明，封面高度随之塌成内容高度（≈28px 细条），整张卡被
+   压扁（2026-10-25 真机报障「游戏卡片被挤压」的根因）。padding-bottom 的百分比按
+   **包含块宽度**解析，CSS2 起所有浏览器都算得对；配 height:0 + 全绝对定位的子元素，
+   任何浏览器都得到 3/4 盒。与 assets/index.html 内联副本保持一致。 */
+.cover{position:relative;height:0;padding-bottom:133.33%;border-radius:12px;overflow:hidden;
   border:1px solid var(--line-2);background:var(--s5)}
 .cover::after{content:"";position:absolute;inset:0;background:linear-gradient(150deg,rgba(255,255,255,.16),transparent 46%)}
-.cover .mark{position:relative;font:700 26px/1 var(--sans);letter-spacing:.1em;color:#fff;text-shadow:0 2px 16px rgba(0,0,0,.55)}
+.cover .mark{position:absolute;top:0;left:0;right:0;bottom:0;display:grid;place-items:center;
+  font:700 26px/1 var(--sans);letter-spacing:.1em;color:#fff;text-shadow:0 2px 16px rgba(0,0,0,.55)}
 .cover .plat{position:absolute;left:8px;top:8px;z-index:2;font:700 10px/1 var(--sans);letter-spacing:.08em;
   padding:4px 6px;border-radius:5px;background:rgba(10,10,10,.62);color:#fff}
 .cover.a1{background:radial-gradient(115% 85% at 22% 14%,#ffb066 0%,#e8552c 38%,#7d1c12 72%,#2a0a06 100%)}

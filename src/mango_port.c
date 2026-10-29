@@ -35,6 +35,7 @@
 
 #include "app_installer.h"
 #include "json_util.h"
+#include "nas_addr.h"
 #include "path_util.h"
 #include "pkg_info.h"
 #include "pkg_installer.h"
@@ -896,20 +897,26 @@ done:
 static int
 nas_compose_url(const char *scheme, const char *user, const char *pass,
                 const char *port, const char *addr, char *out, size_t out_size) {
-  size_t hostlen = strcspn(addr, "/\\");
+  char host[300];
+  const char *rest;
   int n;
 
-  if(!hostlen) { out[0] = 0; return -1; }
-  n = snprintf(out, out_size, "%s://%s%s%s%s%.*s%s%s%s",
+  /* 切分规则走共享的 nas_addr_split：ⓐ 认 '/' 与 '\\' 两种分隔符；
+   * ⓑ 跳过**前导**分隔符。ⓑ 是 2026-10-28 修的真机故障：UNC 形状
+   * \\192.168.1.3\dav 归一化成 //192.168.1.3/dav 后，这里原先算出
+   * hostlen==0 ⇒ 直接 400 "invalid NAS address"，而同一地址列目录、
+   * 读图都正常（list.c 那份跳前导分隔符）⇒「图片能看，PKG 装不了」。 */
+  if(nas_addr_split(addr, host, sizeof(host), &rest)) { out[0] = 0; return -1; }
+  n = snprintf(out, out_size, "%s://%s%s%s%s%s%s%s%s",
                scheme,
                (user && *user) ? user : "",
                (user && *user) ? ":" : "",
                (user && *user) ? (pass ? pass : "") : "",
                (user && *user) ? "@" : "",
-               (int)hostlen, addr,
+               host,
                (port && *port) ? ":" : "",
                (port && *port) ? port : "",
-               addr + hostlen);
+               rest);
   if(n < 0 || (size_t)n >= out_size) { out[0] = 0; return -1; }
   return 0;
 }
@@ -953,7 +960,7 @@ api_nas_copy(struct MHD_Connection *conn, const char *body, size_t body_size) {
   if(!transfer_scheme_supported(scheme)) {
     free(scheme); free(paths); free(dst); free(user); free(pass); free(port);
     return send_json_error_detail(conn, MHD_HTTP_NOT_IMPLEMENTED,
-                                  "NAS backend not compiled in (smb/nfs)",
+                                  "NAS backend not compiled in (smb/nfs/webdav)",
                                   "nas_unsupported", NULL);
   }
   /* 目标必须是**本地**目录（绝对路径）。让它的父目录落在一个远程 URL 上会写出
@@ -1187,7 +1194,7 @@ api_nas_delete(struct MHD_Connection *conn, const char *body, size_t body_size) 
   if(!transfer_scheme_supported(scheme)) {
     free(scheme); free(paths); free(user); free(pass); free(port);
     return send_json_error_detail(conn, MHD_HTTP_NOT_IMPLEMENTED,
-                                  "NAS backend not compiled in (smb/nfs)",
+                                  "NAS backend not compiled in (smb/nfs/webdav)",
                                   "nas_unsupported", NULL);
   }
   label[0] = 0;
@@ -1291,7 +1298,7 @@ api_fetch(struct MHD_Connection *conn, const char *body, size_t body_size) {
   if(!transfer_scheme_supported(scheme)) {
     free(src_path); free(dst); free(scheme);
     return send_json_error_detail(conn, MHD_HTTP_NOT_IMPLEMENTED,
-                                  "NAS backend not compiled in (smb/nfs)",
+                                  "NAS backend not compiled in (smb/nfs/webdav)",
                                   "fetch_unsupported", NULL);
   }
 
@@ -2734,17 +2741,23 @@ api_pkg_enqueue(struct MHD_Connection *conn, const char *body, size_t body_size)
       int rc, composed;
 
       composed = nas_compose_url(scheme, user, pass, port, path, url, sizeof(url));
-      free(scheme); free(user); free(pass); free(port);
-      free(path);
       /* ⚠️ nas_compose_url returns 0 on success, -1 on failure — the first
        * draft had this inverted and every valid NAS enqueue was rejected
        * with "invalid NAS address" while garbage addresses sailed through
        * to the queue (hosttest caught both directions). */
       if(composed) {
-        return send_json_error_detail(conn, MHD_HTTP_BAD_REQUEST,
-                                      "invalid NAS address",
+        /* 把地址说进报错里（2026-10-28）：一句 "invalid NAS address" 不告诉
+         * 用户是哪一段不被接受 —— 真机上只能靠猜。地址里不含凭据，可安全回显。 */
+        char why[256];
+        snprintf(why, sizeof(why), "invalid NAS address: %s",
+                 (path && *path) ? path : "(empty)");
+        free(scheme); free(user); free(pass); free(port);
+        free(path);
+        return send_json_error_detail(conn, MHD_HTTP_BAD_REQUEST, why,
                                       "pkg_url_invalid", NULL);
       }
+      free(scheme); free(user); free(pass); free(port);
+      free(path);
       rc = filemgr_queue_pkg_stream(url, &id);
       if(rc == PKG_INSTALL_UNSUPPORTED) {
         return send_json_error_detail(conn, MHD_HTTP_NOT_IMPLEMENTED,

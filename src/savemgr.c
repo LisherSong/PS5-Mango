@@ -997,8 +997,8 @@ int savemgr_foreground_uid(void) {
 #else
   int uid = 0;
   /* ★ 2026-10-12：必须先 Initialize。
-   * 真机台账实证：`import_archive_finish: uid=1ea2f4d9 fuid=0 aid=... resolved`
-   * —— 真实用户是 1ea2f4d9，fuid 却解析成 0。原因就是本进程从未初始化过
+   * 真机台账实证：`import_archive_finish: uid=<account-id> fuid=0 aid=... resolved`
+   * —— 真实用户是 <account-id>，fuid 却解析成 0。原因就是本进程从未初始化过
    * UserService：未初始化时 GetForegroundUser **不报错**，只是把 *user_id
    * 留在 0。这个 0 随后被 savemgr_resign_sfo() 写进存档 SFO 的 USER_ID，
    * 等于把存档签给一个不存在的用户（Garlic 也记过 PS5 必须同时写 AID 与 UID）。
@@ -1792,6 +1792,75 @@ int savemgr_unregister_db(const char *uid_hex, int is_ps4,
   return rc == SQLITE_OK ? 0 : -1;
 }
 
+/* ---- 幽灵卡片：空 TITLE_ID 目录 -----------------------------------------
+ * 浏览页是按**目录**扫的（`/user/home/<uid>/savedata_prospero/<TID>/`），不是
+ * 按镜像扫的。于是「镜像全删了、目录还在」这种情况照样生成一张卡：槽位数 0、
+ * 大小 0、名字还查得到（本地缓存留着）—— 看起来就像存档还在。
+ * 更糟的是删不掉：整体删除按槽位循环，槽位 0 个 ⇒ 返回 0 ⇒ 路由回
+ * 「save not found」，用户点多少次都清不掉那一格。
+ *
+ * 所以「删最后一份存档」必须自己收尾，把空目录一并 rmdir 掉。判据只有一条：
+ * **rmdir 成功 = 真的空了**。有残留槽位时内核会回 ENOTEMPTY，天然安全。
+ * 三处目录都要收：PS5 镜像、PS4 镜像、PS5 元数据（icon 只在后者）。 */
+static int
+sm_rmdir_if_empty(const char *raw) {
+  char mapped[MAX_PATH_LEN];
+  sm_map_path(raw, mapped, sizeof(mapped));
+  if (rmdir(mapped) == 0) return 1;
+  if (errno == ENOENT) return 0;                        /* 已经没了 = 已清理 */
+  if (errno == ENOTEMPTY || errno == EEXIST) return 0;  /* 还有别的槽位，保留 */
+  return -1;                                            /* 其它错误：交给台账 */
+}
+
+/* 三处可能残留的 TITLE_ID 目录。定义成文件作用域，让「清理」和「数还剩几个」
+ * 用同一份清单 —— 两处各抄一遍，迟早有一处忘了改（本项目的老毛病）。 */
+static const char *const sm_title_dir_cand[] = {
+  "/user/home/%s/savedata_prospero/%s",            /* PS5 镜像 */
+  "/user/home/%s/savedata/%s",                     /* PS4 镜像 */
+  "/user/home/%s/savedata_prospero_meta/user/%s",  /* PS5 元数据/icon */
+};
+#define SM_TITLE_DIR_N ((int)(sizeof(sm_title_dir_cand) / sizeof(sm_title_dir_cand[0])))
+
+/* 这些候选目录现在还剩几个（0..SM_TITLE_DIR_N）。
+ * ★ 为什么需要它：删槽位时就会顺手清目录，所以到「整体删除」那一步再去数
+ *   rmdir 的返回值永远是 0 —— 用那个 0 去回答前端「有没有清掉空目录」，就会
+ *   把"刚清掉"说成"什么都没有"（第一次实现正是这么错的，单测当场抓住）。 */
+static int
+sm_title_dirs_present(const char *uid_hex, const char *title_id) {
+  char raw[MAX_PATH_LEN], mapped[MAX_PATH_LEN];
+  int n = 0;
+  for (int i = 0; i < SM_TITLE_DIR_N; i++) {
+    snprintf(raw, sizeof(raw), sm_title_dir_cand[i], uid_hex, title_id);
+    sm_map_path(raw, mapped, sizeof(mapped));
+    struct stat st;
+    if (stat(mapped, &st) == 0 && S_ISDIR(st.st_mode)) n++;
+  }
+  return n;
+}
+
+/* 清理某个 title 下的空目录，返回**实际清掉**的目录数；<0 参数非法。
+ * errors（可选）累计 rmdir 失败数 —— 失败要留在台账里，不能假装干净。 */
+int savemgr_prune_empty_dirs(const char *uid_hex, const char *title_id,
+                             int *errors) {
+  if (errors) *errors = 0;
+  if (!uid_hex || !sm_safe_name(uid_hex)) return -1;
+  if (!sm_safe_name(title_id)) return -1;
+  char raw[MAX_PATH_LEN];
+  int cleaned = 0;
+  for (int i = 0; i < SM_TITLE_DIR_N; i++) {
+    snprintf(raw, sizeof(raw), sm_title_dir_cand[i], uid_hex, title_id);
+    int r = sm_rmdir_if_empty(raw);
+    if (r > 0) {
+      cleaned++;
+      mango_log("save_mgr/prune: removed empty dir uid=%s tid=%s what=%s",
+                uid_hex, title_id, i == 0 ? "ps5" : (i == 1 ? "ps4" : "meta"));
+    } else if (r < 0 && errors) {
+      (*errors)++;
+    }
+  }
+  return cleaned;
+}
+
 /* 删掉一份存档：镜像 +（PS4）封密钥 .bin + 元数据 icon + 系统库里那条记录。
  * ★ 全程不挂载 —— 挂载是为读写存档**内容**，删整个存档不需要打开它，也就
  *   不必付一次内核调用（一次 = 一次可能永不返回）的风险。
@@ -1836,7 +1905,12 @@ int savemgr_delete_save(const char *uid_hex, const char *title_id,
            uid_hex, title_id, dir_name);
   sm_map_path(cand, ico, sizeof(ico));
   if (stat(ico, &st) == 0) unlink(ico);
-  return savemgr_unregister_db(uid_hex, is_ps4, title_id, dir_name) == 0 ? 0 : -3;
+  int db_rc = savemgr_unregister_db(uid_hex, is_ps4, title_id, dir_name);
+  /* ★ 删掉最后一个槽位后 TITLE_ID 目录就空了。不收尾 = 一张永远删不掉的
+   *   幽灵卡片（浏览页按目录扫，目录在就出卡）。rmdir 只在真的空时成功，
+   *   还有别的槽位时会 ENOTEMPTY 被忽略，所以这里无条件调用是安全的。 */
+  savemgr_prune_empty_dirs(uid_hex, title_id, NULL);
+  return db_rc == 0 ? 0 : -3;
 }
 
 /* 按游戏整体删除（「一个游戏 = 一个整体」是用户定的操作粒度）。
@@ -1845,18 +1919,29 @@ int savemgr_delete_save(const char *uid_hex, const char *title_id,
  * 某个槽位失败**不中断**：一个游戏里有一个槽位删不掉，不代表剩下的也不该删。
  * 返回成功删掉的槽位数；failed（可选）累计失败数。 */
 int savemgr_delete_game(const char *uid_hex, const char *title_id,
-                        int *failed) {
+                        int *failed, int *pruned) {
   if (failed) *failed = 0;
+  if (pruned) *pruned = 0;
   if (!uid_hex || !sm_safe_name(uid_hex)) return -1;
   if (!sm_safe_name(title_id)) return -1;
   char dirs[SM_GAME_SLOTS_MAX][64];
   int ps4[SM_GAME_SLOTS_MAX];
+  /* 先数一遍「现在有几个 TITLE_ID 目录」，删完再数一遍 —— 差值是**真的清掉的
+   * 空壳数**。直接看 rmdir 的返回值会永远得到 0：删最后一份存档时
+   * savemgr_delete_save 已经把目录清掉了，这里再 rmdir 只能拿到 ENOENT。 */
+  int had_dirs = sm_title_dirs_present(uid_hex, title_id);
   int n = sm_game_slots(uid_hex, title_id, dirs, SM_GAME_SLOTS_MAX, ps4);
   int ok = 0;
   for (int i = 0; i < n; i++) {
     if (savemgr_delete_save(uid_hex, title_id, dirs[i]) == 0) ok++;
     else if (failed) (*failed)++;
   }
+  /* 槽位数 0 也要走这一步：本机可能只剩一个空目录（历史残留，或上一次删除
+   * 只删了镜像没删目录）。这也是「删除」对幽灵卡片唯一有效的入口 ——
+   * 不清理的话路由只能回 save not found，用户永远点不掉那一格。 */
+  savemgr_prune_empty_dirs(uid_hex, title_id, NULL);
+  int now_dirs = sm_title_dirs_present(uid_hex, title_id);
+  if (pruned && had_dirs > now_dirs) *pruned = had_dirs - now_dirs;
   return ok;
 }
 
@@ -2943,6 +3028,12 @@ enum MHD_Result api_save_mgr_games(struct MHD_Connection *conn, const char *url,
   struct { char tid[64]; char gt[256]; int installed; } gtcache[SM_LIST_GT_CACHE];
   int ngtc = 0;
 
+  /* 扫描中发现的空 TITLE_ID 目录（幽灵卡片）。扫完统一清理 —— 在 readdir
+   * 循环里直接 rmdir 会让同一目录下的兄弟项被跳过（POSIX 不保证遍历中删条目
+   * 的语义），所以先记下来，closedir 之后再动手。 */
+  struct { char uid[16]; char tid[64]; } prune[32];
+  int nprune = 0;
+
   DIR *home = opendir("/user/home");
   if (home) {
     struct dirent *hu;
@@ -3010,6 +3101,19 @@ enum MHD_Result api_save_mgr_games(struct MHD_Connection *conn, const char *url,
           char first_dir[256] = {0};
           int slots = 0;
           sm_dir_scan_approx(path, &total, first_dir, sizeof(first_dir), &slots);
+          /* ★ 槽位 0 且字节 0 = 只有一个空目录：这不是存档，是上一轮删除留下
+           *   的壳。既不出卡（出卡就是幽灵卡片，且显示成「1 文件夹」），也登记
+           *   下来扫完清掉。判据只用「空」，有残留槽位的目录一律保留。 */
+          if (slots == 0 && total == 0) {
+            if (nprune < (int)(sizeof(prune) / sizeof(prune[0]))) {
+              snprintf(prune[nprune].uid, sizeof(prune[nprune].uid), "%s",
+                       hu->d_name);
+              snprintf(prune[nprune].tid, sizeof(prune[nprune].tid), "%s",
+                       te->d_name);
+              nprune++;
+            }
+            continue;
+          }
           sm_json_esc(first_dir, dir_esc, sizeof(dir_esc));
           sm_json_append(out, SM_GAMES_JSON_CAP, &pos, "%s", first ? "" : ",");
           first = 0;
@@ -3033,6 +3137,15 @@ enum MHD_Result api_save_mgr_games(struct MHD_Connection *conn, const char *url,
       }
     }
     closedir(home);
+  }
+  /* 清掉扫描中登记的空目录。rmdir 只在目录**真的空了**时成功，所以即使这期间
+     有别的请求刚往同一目录放进一份存档，也只会得到 ENOTEMPTY 而保留它。 */
+  if (nprune > 0) {
+    int perr = 0;
+    for (int i = 0; i < nprune; i++)
+      savemgr_prune_empty_dirs(prune[i].uid, prune[i].tid, &perr);
+    mango_log("save_mgr/games: pruned %d empty title dir(s), %d error(s)",
+              nprune, perr);
   }
   sm_json_append(out, SM_GAMES_JSON_CAP, &pos, "]}");
   return send_buffer(conn, MHD_HTTP_OK, out, "application/json");
@@ -5243,17 +5356,23 @@ enum MHD_Result api_save_mgr_delete(struct MHD_Connection *conn,
                        "application/json");
   }
   /* 整体删除：逐个槽位删，失败的记数但**不中断**（一个槽位删不掉不代表剩下
-     的也不该删）。返回删掉了几个、失败了几个，前端如实告诉用户。 */
-  int failed = 0;
-  int n = savemgr_delete_game(uid_hex, tid, &failed);
+     的也不该删）。返回删掉了几个、失败了几个、顺手清掉了几个空目录（幽灵
+     卡片就是空目录，槽位 0 个时也必须能删掉这一格）。 */
+  int failed = 0, pruned = 0;
+  int n = savemgr_delete_game(uid_hex, tid, &failed, &pruned);
   free(uid); free(tid); free(dir);
   if (n < 0) return send_json_error(conn, MHD_HTTP_BAD_REQUEST, "bad name");
-  if (n == 0) return send_json_error(conn, MHD_HTTP_NOT_FOUND, "save not found");
-  mango_log("save_mgr/delete: game uid=%s tid=%s deleted=%d failed=%d",
-            uid_hex, tid, n, failed);
+  /* 既没有槽位、也没有可清的空目录 ⇒ 真的什么都没有，才是 404。
+     只要清掉了目录就要回 ok：否则用户点了「删除」，界面报 not found，
+     而卡片纹丝不动 —— 这正是幽灵卡片删不掉的观感。 */
+  if (n == 0 && pruned == 0)
+    return send_json_error(conn, MHD_HTTP_NOT_FOUND, "save not found");
+  mango_log("save_mgr/delete: game uid=%s tid=%s deleted=%d failed=%d cleaned=%d",
+            uid_hex, tid, n, failed, pruned);
   char out[192];
   snprintf(out, sizeof(out),
-           "{\"ok\":true,\"deleted\":%d,\"failed\":%d}", n, failed);
+           "{\"ok\":true,\"deleted\":%d,\"failed\":%d,\"cleaned\":%d}",
+           n, failed, pruned);
   return send_buffer(conn, MHD_HTTP_OK, strdup(out), "application/json");
 }
 

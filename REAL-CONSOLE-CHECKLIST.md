@@ -6,7 +6,14 @@
 ⚠️ `src/main.c` 里的 `PROCESS_NAME` 故意**不带版本**：它是「杀掉旧实例」的匹配键，
 带版本会导致升级时匹配不到旧进程，两个实例并存、新实例悄悄退到 2027 端口。
 **构成**：owendswang/ps5-web-file-manager 最新版后端 `src/` + Mango 的 `assets/` 前端 + 新写的 `src/mango_port.c`。
-**本机验证**：`hosttest.py`（**80 项，全绿，连跑两次结果一致**）+ `.build/preview_check.mjs`（前端 57 项）。
+**本机验证**：`hosttest.py` + `.build/preview_check.mjs`。
+（条数一律看运行末尾的 `N passed, 0 failed` / 前端门的 stamp，**不要背数字** ——
+写死过的数字涨了没人同步，那行陈旧文本本身就是"这门禁没被跑过"的证据。）
+
+> ⚠️ **版本号分两条线，别混用**。本项目 2026-10-26 起另起了一条版本线（当前
+> `v1.1`），而本文 §21–§24 里写的 `v1.0.10 / v1.0.11 / v1.0.12` 属于**旧线**
+> （旧线最高到 v1.0.31，已推 GitHub 并冻结）。验收步骤照用，但版本号一律以
+> `Makefile` 的 `VERSION_TAG` 为准；当前权威交接见 `HANDOVER-2026-10-29.md`。
 
 ---
 

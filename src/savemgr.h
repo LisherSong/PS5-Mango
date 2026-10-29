@@ -138,9 +138,17 @@ int sm_game_slots(const char *uid_hex, const char *tid, char dirs[][64],
 /* 按游戏整体删除：该 title_id 下**所有**槽位的镜像 + PS4 .bin + icon + db 行。
  * 「一个游戏 = 一个整体」是用户定的粒度。不挂载。
  * 返回成功删掉的槽位数；0 = 本机没有这个游戏的存档；<0 参数/名字非法。
- * 部分槽位失败不中断（尽力删完），失败数通过 *failed 返回。 */
+ * 部分槽位失败不中断（尽力删完），失败数通过 *failed 返回。
+ * pruned（可选）回告**清理掉的空目录数**：槽位全删光后 TITLE_ID 目录会变空，
+ * 不 rmdir 就是一张删不掉的幽灵卡片（浏览页按目录扫）。 */
 int savemgr_delete_game(const char *uid_hex, const char *title_id,
-                        int *failed);
+                        int *failed, int *pruned);
+
+/* 清理某个 title 的空目录（PS5/PS4 镜像目录 + PS5 元数据目录），
+ * 返回实际清掉的目录数；<0 参数非法。errors（可选）累计 rmdir 失败数。
+ * 只在目录**真的空了**时成功（ENOTEMPTY 留给「还有其它槽位」）。 */
+int savemgr_prune_empty_dirs(const char *uid_hex, const char *title_id,
+                             int *errors);
 
 /* Delete one save slot: image + (PS4) <dir>.bin + meta icon + the db row.
  * Does NOT mount — mounting is for reading/writing save *contents*; deleting

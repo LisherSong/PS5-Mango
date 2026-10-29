@@ -1,0 +1,13 @@
+mbedTLS 3.6.7 (PS5, prospero-cmake + Ninja, static)
+source sha256 : a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
+config flags  : MBEDTLS_THREADING_C, MBEDTLS_THREADING_PTHREAD
+built         : 2026-10-25 21:56:59 +0800
+recipe        : cobanov/PS5LM scripts/build-mbedtls.sh (GitHub reference)
+libs          :
+  cmake  4096 bytes
+  libeverest.a  2520 bytes
+  libmbedcrypto.a  1279098 bytes
+  libmbedtls.a  610824 bytes
+  libmbedx509.a  134604 bytes
+  libp256m.a  1752 bytes
+  pkgconfig  4096 bytes

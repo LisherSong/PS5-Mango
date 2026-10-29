@@ -11,6 +11,7 @@
 
 #include "filemgr_internal.h"
 #include "json_util.h"
+#include "nas_addr.h"
 #include "path_util.h"
 #include "transfer.h"
 #include "websrv.h"
@@ -50,6 +51,11 @@ typedef struct pkg_source {
   pkg_param_type_t param_type;
   uint64_t icon_offset;
   uint32_t icon_size;
+  /* 打开失败的原因（2026-10-28）：NAS 上的包读不出来有四种完全不同的成因
+   * —— 协议没编译进来 / 地址拼不出来 / 打不开 / 读不到大小，当年全塌成一句
+   * "could not read package information"，用户无从判断该改地址还是改凭据。
+   * 挂在 source 上（不是全局）：一次打开一份，跟请求走。 */
+  char why[160];
 } pkg_source_t;
 
 typedef enum json_token_type {
@@ -151,20 +157,24 @@ pkg_source_close(pkg_source_t *pkg) {
 static int
 pkg_nas_compose_url(const char *scheme, const char *user, const char *pass,
                     const char *port, const char *addr, char *out, size_t out_size) {
-  size_t hostlen = strcspn(addr, "/\\");
+  char host[300];
+  const char *rest;
   int n;
 
-  if(!hostlen) return -1;
-  n = snprintf(out, out_size, "%s://%s%s%s%s%.*s%s%s%s",
+  /* 与 list.c / mango_port.c 共用同一份切分规则（跳过前导分隔符）——
+   * 2026-10-28 真机：PKG 元信息当年因为 hostlen==0 判死，表现为
+   * 「could not read package information」，而同一地址读图是好的。 */
+  if(nas_addr_split(addr, host, sizeof(host), &rest)) return -1;
+  n = snprintf(out, out_size, "%s://%s%s%s%s%s%s%s%s",
                scheme,
                (user && *user) ? user : "",
                (user && *user) ? ":" : "",
                (user && *user) ? (pass ? pass : "") : "",
                (user && *user) ? "@" : "",
-               (int)hostlen, addr,
+               host,
                (port && *port) ? ":" : "",
                (port && *port) ? port : "",
-               addr + hostlen);
+               rest);
   if(n < 0 || (size_t)n >= out_size) return -1;
   return 0;
 }
@@ -179,14 +189,26 @@ pkg_source_open_nas(const char *path, const char *scheme, const char *user,
   uint64_t size = 0;
 
   if(!scheme || !*scheme || !path || !*path) return -1;
-  if(!transfer_scheme_supported(scheme)) return -1;
+  if(!transfer_scheme_supported(scheme)) {
+    snprintf(pkg->why, sizeof(pkg->why), "协议 %s 未编译进本版", scheme);
+    return -1;
+  }
   if(pkg_nas_compose_url(scheme, user, pass, port, path,
-                         url, sizeof(url))) return -1;
+                         url, sizeof(url))) {
+    snprintf(pkg->why, sizeof(pkg->why), "NAS 地址拼不出来（%s）",
+             path && *path ? path : "(空)");
+    return -1;
+  }
   pkg->src = transfer_open(scheme, url + strlen(scheme) + 3);
-  if(!pkg->src) return -1;
+  if(!pkg->src) {
+    snprintf(pkg->why, sizeof(pkg->why), "打不开（凭据/共享名/网络）");
+    return -1;
+  }
   if(transfer_size(pkg->src, &size) != MANGO_OK || size <= PKG_HEADER_SIZE) {
     transfer_close(pkg->src);
     pkg->src = NULL;
+    snprintf(pkg->why, sizeof(pkg->why), "读不到文件大小或文件过小（%llu B）",
+             (unsigned long long)size);
     return -1;
   }
   pkg->size = size;
@@ -246,9 +268,13 @@ pkg_source_open_ex(const char *path, const char *scheme, const char *user,
   pkg->fd = -1;
   if(scheme && *scheme) {
     if(pkg_source_open_nas(path, scheme, user, pass, port, pkg)) goto done;
-  } else if(!strncmp(path, "smb://", 6) || !strncmp(path, "nfs://", 6)) {
-    /* The queue stores the composed URL, credentials included: open it
-     * directly instead of letting it reach open() and fail. */
+  } else if(strstr(path, "://")) {
+    /* 任何已注册后端的 URL（smb/nfs/webdav/webdavs…）都走 URL 分支。
+     * ⚠️ 判定不能写死 smb/nfs 清单：webdav 当年不在清单里 ⇒ 掉进下面的
+     * open() ⇒ ENOENT ⇒ PKG 信息面板「无法读取包信息」且装上去
+     * title_id/content_id 全空（真机 mango-install.log: meta=(none)）。
+     * 未注册的 scheme 由 pkg_source_open_url() 内的
+     * transfer_scheme_supported() 挡掉，也不会误导成「文件不存在」。 */
     if(pkg_source_open_url(path, pkg)) goto done;
   } else if((pkg->fd = open(path, O_RDONLY)) < 0 || fstat(pkg->fd, &st) ||
      !S_ISREG(st.st_mode) || st.st_size < PKG_HEADER_SIZE ||
@@ -739,9 +765,17 @@ done:
 }
 
 static enum MHD_Result
-pkg_error(struct MHD_Connection *conn, const char *path) {
-  return send_json_error_detail(conn, MHD_HTTP_BAD_REQUEST,
-                                "could not read package information",
+pkg_error(struct MHD_Connection *conn, const char *path, const char *why) {
+  char msg[256];
+
+  /* 有原因就把原因说在报错里：一句「包信息读不出来」把「地址拼错」和
+   * 「密码不对」混成一谈，用户只能靠猜。 */
+  if(why && *why)
+    snprintf(msg, sizeof(msg), "%s：%s",
+             "could not read package information", why);
+  else
+    snprintf(msg, sizeof(msg), "%s", "could not read package information");
+  return send_json_error_detail(conn, MHD_HTTP_BAD_REQUEST, msg,
                                 "pkg_info_failed", path);
 }
 
@@ -772,13 +806,13 @@ api_pkg_info(struct MHD_Connection *conn, const char *body, size_t body_size) {
   strbuf_t json = {0};
 
   if(!path || pkg_api_open(conn, body, body_size, path, &pkg)) {
-    enum MHD_Result ret = pkg_error(conn, path);
+    enum MHD_Result ret = pkg_error(conn, path, pkg.why);
     free(path);
     return ret;
   }
   if(!(param = malloc(pkg.param_size)) ||
      pkg_read(&pkg, param, pkg.param_size, pkg.param_offset)) {
-    enum MHD_Result ret = pkg_error(conn, path);
+    enum MHD_Result ret = pkg_error(conn, path, NULL);
     free(param);
     pkg_source_close(&pkg);
     free(path);
@@ -818,7 +852,7 @@ api_pkg_info(struct MHD_Connection *conn, const char *body, size_t body_size) {
       append_sfo_fields(&json, param, pkg.param_size))) {
     enum MHD_Result ret;
     free(json.data);
-    ret = pkg_error(conn, path);
+    ret = pkg_error(conn, path, NULL);
     free(param);
     pkg_source_close(&pkg);
     free(path);

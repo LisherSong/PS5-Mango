@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "json_util.h"
+#include "nas_addr.h"
 #include "path_util.h"
 #include "transfer.h"
 
@@ -23,31 +24,20 @@
  * end up in the browser's path bar / crumbs, which is what the user sees and
  * could copy around.
  * ------------------------------------------------------------------------- */
-static void
+/* v1.0.8：不再 static —— /api/fs/read 也要拼同一个 URL（NAS 上的图片预览当年
+ * 走的是本地 fopen，把 host/share/path 当成本地路径，于是「列得出来、点不开」）。
+ * 拆 URL 的活只有这一处，别在 text.c 里另写一份。 */
+void
 nas_build_url(const char *path, const char *user, const char *pass,
-              const char *port, char *out, size_t out_size) {
+              const char *port, const char *scheme, char *out, size_t out_size) {
   char host[300];
   const char *rest;
-  const char *slash;
-  size_t hl, cut;
 
-  /* Split "host[:port]/share/sub" at the first separator — everything before it
-     is the address part, everything from it on is the share-relative remainder.
-     🪤 分隔符有两种：用户从资源管理器「复制路径」拿到的是
-     \\192.168.1.100\PS5_Games，手打的常见形状是 192.168.1.100\PS5_Games。
-     原来只认 '/'，于是整串（含反斜杠）落进 host、share 为空 —— 后面
-     transfer_url_parse 把它整个交给 getaddrinfo，报的就是
-     "Invalid address:… Can not resolve into IPv4/v6"。
-     ⚠️ 同时跳过**前导**分隔符：UNC 形状 \\host\share 的第一个字符就是分隔符，
-     不跳的话 host 会被切成长度 0，变成一句「地址无法解析」。 */
-  while(*path == '/' || *path == '\\') path++;
-  cut = strcspn(path, "/\\");
-  slash = path + cut;
-  hl = cut;
-  if(hl >= sizeof(host)) hl = sizeof(host) - 1;
-  memcpy(host, path, hl);
-  host[hl] = 0;
-  rest = *slash ? slash : "";
+  /* 切分规则只有 nas_addr_split 一份（跳过前导分隔符、认 '/' 与 '\\'）。
+   * 2026-10-28 之前这里和 PKG 那两份各写一遍 strcspn，且只有这份跳前导
+   * 分隔符 ⇒ 同一个 `/192.168.1.3/dav/x.pkg` 列目录过、PKG 判死。 */
+  out[0] = 0;
+  if(nas_addr_split(path, host, sizeof(host), &rest)) return;
 
   if(user && *user) {
     if(port && *port)
@@ -59,6 +49,17 @@ nas_build_url(const char *path, const char *user, const char *pass,
       snprintf(out, out_size, "%s:%s%s", host, port, rest);
     else
       snprintf(out, out_size, "%s%s", host, rest);
+  }
+
+  /* webdavs：把 scheme 前缀补进 URL —— transfer_url_parse 靠 "webdavs://"
+   * 前缀置 nas.tls=1（默认端口 443、选 TLS 传输）。其余 scheme 不需要前缀，
+   * 不带前缀的解析结果与历史行为完全一致。 */
+  if(scheme && !strcmp(scheme, "webdavs")) {
+    size_t ol = strlen(out);
+    if(ol + 10 < out_size) {
+      memmove(out + 10, out, ol + 1);
+      memcpy(out, "webdavs://", 10);
+    }
   }
 }
 
@@ -88,9 +89,15 @@ nas_list(struct MHD_Connection *conn, const char *scheme, const char *path,
      把人带进沟里（真机实测 2026-10-02：AppleNas/Samba TRIM 即此行为，
      PC 侧 vendored libsmb2 复现一致）。共享名缺失应在入口就拦下。 */
   if(scheme && !strcmp(scheme, "smb")) {
-    const char *pp = path, *sep;
-    while(*pp == '/' || *pp == '\\') pp++;
-    sep = pp + strcspn(pp, "/\\");
+    char host[300];
+    const char *rest, *sep;
+    /* 切分同样走共享的 nas_addr_split：这里要的是「主机之后还有没有共享名」，
+     * 跟拼接用的是同一条「主机在哪结束」的规则（UNC 前导分隔符一并跳过）。 */
+    if(nas_addr_split(path, host, sizeof(host), &rest)) {
+      return send_json_error_detail(conn, MHD_HTTP_BAD_REQUEST,
+                                    "NAS 地址为空", "nas_bad_address", NULL);
+    }
+    sep = rest;
     while(*sep == '/' || *sep == '\\') sep++;
     if(!*sep) {
       /* ⚠️ 这句话以前写作「需包含共享名」，用户读成「必须指定一个文件夹」，于是问
@@ -108,7 +115,7 @@ nas_list(struct MHD_Connection *conn, const char *scheme, const char *path,
     }
   }
 
-  nas_build_url(path, user, pass, port, url, sizeof(url));
+  nas_build_url(path, user, pass, port, scheme, url, sizeof(url));
   s = transfer_open(scheme, url);
   if(!s) {
     /* Two distinct causes, told apart so the user knows what to change. */
@@ -116,7 +123,7 @@ nas_list(struct MHD_Connection *conn, const char *scheme, const char *path,
       conn, MHD_HTTP_BAD_GATEWAY,
       transfer_scheme_supported(scheme)
         ? "NAS 地址无法解析：请写成 主机/共享（如 192.168.1.100/media）；端口只能写数字"
-        : "NAS backend not compiled in (smb/nfs)",
+        : "NAS backend not compiled in (smb/nfs/webdav)",
       "nas_bad_address", NULL);
   }
 

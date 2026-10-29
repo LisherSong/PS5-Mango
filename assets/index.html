@@ -606,6 +606,43 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 #scrimView .dlg{display:flex;flex-direction:column;overflow:hidden}
 #scrimView .dlg-b{display:flex;flex-direction:column;flex:1;min-height:0;padding-bottom:18px}
 #scrimView #vBody{flex:1;min-height:0;max-height:none;overflow:auto}
+/* ── 视频播放器（#scrimPlayer） ─────────────────────────────────────────── */
+#scrimPlayer .player-box{width:min(1080px,96vw);max-height:94vh;display:flex;flex-direction:column;
+  background:linear-gradient(180deg,#101418,#0a0d10);border:1px solid var(--line-2);
+  border-radius:var(--r-card);box-shadow:0 30px 80px -20px rgba(0,0,0,.8);overflow:hidden}
+#scrimPlayer .player-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);flex:none}
+#scrimPlayer .player-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+#scrimPlayer .player-stage{position:relative;background:#000;min-height:120px;display:flex;align-items:center;justify-content:center}
+#scrimPlayer #playerVideo{width:100%;max-height:min(70vh,calc(94vh - 120px));display:block;background:#000}
+/* 音频模式的舞台占位图标：没有画面时给一个视觉锚点，避免一块 120px 的空黑。
+   用 class 而不是 [hidden] 切换 —— [hidden] 会被作者 display 规则盖掉（本文件
+   已踩过四次，见 .player-err 那段）。margin-bottom 把图标顶离中心，好让
+   .player-loading 的「加载中…」居中时压在它下面而不是叠在图标上。 */
+#scrimPlayer .player-art{display:none;width:64px;height:64px;color:var(--fg3);opacity:.4;margin-bottom:72px}
+#scrimPlayer.audio .player-art{display:block}
+#scrimPlayer .player-err{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  padding:24px;text-align:center;color:#ffb4a8;font-size:14px;line-height:1.7;background:rgba(0,0,0,.85)}
+/* ⚠️ 与 .gcard/.svi/.search 同一个坑（见本文件后面那几条 [hidden] 护栏）：
+   `.player-err{display:flex}` 是作者样式，优先级高于 UA 的 `[hidden]{display:none}`，
+   于是 JS 里 `err.hidden = true` **完全无效** —— 那块 rgba(0,0,0,.85) 的空错误层
+   永远铺在 <video> 上面。2026-10-29 真机原话「像蒙了一层黑纱，调亮度也没用，
+   一调就太白」：提亮只作用于视频本身，黑纱纹丝不动，两者叠加就发灰发白。
+   这条必须留在 .player-err 的 display 规则之后。 */
+#scrimPlayer .player-err[hidden]{display:none}
+#scrimPlayer .player-loading{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  color:var(--fg3);font-size:13px;pointer-events:none}
+#scrimPlayer .player-ctl{display:flex;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid var(--line);flex:none;flex-wrap:wrap}
+#scrimPlayer .player-btn{min-width:34px;justify-content:center;font-size:13px}
+#scrimPlayer .player-time{font-size:12px;color:var(--fg3);font-variant-numeric:tabular-nums;min-width:96px;text-align:center}
+#scrimPlayer .player-seek{flex:1;min-width:120px}
+#scrimPlayer .player-lbl{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg3)}
+#scrimPlayer .player-ctl input[type=range]{width:96px;accent-color:var(--brand);cursor:pointer}
+#scrimPlayer .player-ctl .player-seek{width:auto}
+/* 文件行内播放按钮（仅视频类型行由 fsViewRow 注入） */
+.vplay{display:inline-flex;align-items:center;justify-content:center;width:calc(20px*var(--ui));height:calc(20px*var(--ui));
+  margin-left:6px;border:1px solid var(--line-2);border-radius:50%;background:var(--s2);color:var(--brand);
+  font-size:9px;line-height:1;cursor:pointer;vertical-align:middle;flex:none;padding:0}
+.vplay:hover{background:var(--brand);color:#fff;border-color:var(--brand)}
 .dlg{width:min(660px,94vw);max-height:88vh;overflow:auto;
   background:linear-gradient(180deg,var(--s2),var(--page) 132px);
   border:1px solid var(--line-2);border-radius:var(--r-card);
@@ -637,10 +674,30 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .picker .r.sel{background:var(--brand-soft);box-shadow:inset 3px 0 0 var(--brand)}
 .picker .r .sz{font:12.5px var(--mono);color:var(--fg3)}
 .quick{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}
-#fsRoots .nasbox{display:inline-flex;gap:6px;align-items:center}
+/* NAS 书签条必须**自己参与折行**。原来是 inline-flex 单体：8 个书签拼成 2404px 的
+   一个 flex item，容器只有 1068px ⇒ 整块被裁，第 5 个之后点不到；+NAS 还被挤到
+   下一行。改成 wrap + flex:1 1 auto 后，书签与本地盘按钮同流，放不下往第二行排。 */
+#fsRoots .nasbox{display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1 1 240px;min-width:0}
+/* 单条限宽 + 尾部省略：地址实测能撑到 414px，一条就顶掉半行。
+   ⚠️ 基数是**视觉宽度**，别写 300：.quick button 的高/内边距都乘 --ui(1.25)，
+   写成 300px*var(--ui) 实际是 375px，一条占掉小半行，1100 宽下只放得下 4 条。
+   overflow:hidden 是必须的 —— 没有它，超出 max-width 的部分（HTTPS 开关和 ×）
+   会溢出到按钮外面，看着像「删除按钮不见了」。 */
+#nasBox>button{max-width:calc(240px*var(--ui));min-width:0;overflow:hidden}
+#nasBox>button>.i{flex:none}
+#nasBox .nlabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* ⚠️ [hidden] 是 UA 样式，会被 `.quick button{display:flex}` 直接盖掉（本文件第 4 次
+   踩这个坑）。折叠靠 hidden 属性就**必须**有这条作者规则兜着，否则「说只显示两行、
+   实际一行都没少」，而且不报错。 */
+#nasBox>button[hidden]{display:none}
+#fsRoots button.nasmore{border-style:dashed;border-color:var(--brand-line);color:var(--brand-text);background:var(--brand-soft)}
 #fsRoots button.nasadd{border-style:dashed}
 #fsRoots .nax{margin-left:5px;color:var(--muted);font-size:11px;cursor:pointer;padding:0 2px;user-select:none}
 #fsRoots .nax:hover{color:var(--bad)}
+/* NAS 书签上的小字（删除 ×、HTTPS 开关）：与上面同一口径，但 hover 不转红 ——
+   它不是删除按钮。 */
+#nasBox .nax{margin-left:6px;color:var(--muted);font-size:11px;cursor:pointer;padding:0 3px;user-select:none;flex:none}
+#nasBox .nax:hover{color:var(--fg)}
 #fsRoots .nasedit input{max-width:230px;padding:5px 8px;border-radius:6px;border:1px solid var(--ghost-line);background:var(--s1);color:var(--text);font-size:12.5px}
 .quick button{height:calc(38px*var(--ui));padding:0 calc(14px*var(--ui));border:1px solid var(--line);border-radius:var(--r-pill);background:var(--s3);font-size:calc(14px*var(--ui));color:var(--fg2);display:flex;align-items:center;gap:7px;
   transition:background .15s,border-color .15s,color .15s}
@@ -822,11 +879,20 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   box-shadow:0 2px 6px rgba(0,0,0,.35),0 22px 44px -18px rgba(0,0,0,.65)}
 .gcard:hover .cover{box-shadow:inset 0 0 0 1px rgba(255,255,255,.11),0 10px 26px -12px rgba(0,0,0,.6)}
 .gcard:focus-visible{outline:none;box-shadow:0 0 0 2px var(--brand),0 0 0 4px var(--brand-soft)}
-.cover{position:relative;aspect-ratio:3/4;border-radius:12px;overflow:hidden;display:grid;place-items:center;
+/* 封面 3:4 —— ⚠️ 不能用 aspect-ratio：PS5 的 WebKit（Safari 14 一代——认 inset 但不认
+   aspect-ratio）会整条丢弃该声明，封面高度随之塌成内容高度（≈28px 细条），整张卡被
+   压扁（2026-10-25 真机报障「游戏卡片被挤压」的根因）。padding-bottom 的百分比按
+   **包含块宽度**解析，CSS2 起所有浏览器都算得对；配 height:0 + 全绝对定位的子元素，
+   任何浏览器都得到 3/4 盒。改造后 Chromium 实测卡高 472px→470px（2px 差来自边框）。 */
+.cover{position:relative;height:0;padding-bottom:133.33%;border-radius:12px;overflow:hidden;
   border:1px solid var(--line-2);background:var(--s5);
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);transition:box-shadow .18s}
 .cover::after{content:"";position:absolute;inset:0;background:linear-gradient(150deg,rgba(255,255,255,.16),transparent 46%)}
-.cover .mark{position:relative;font:700 26px/1 var(--sans);letter-spacing:.1em;color:#fff;text-shadow:0 2px 16px rgba(0,0,0,.55)}
+/* .mark 是封面兜底大字（TITLE_ID 尾段 / fPKG 的 "IMG"）。封面高度改由 padding-bottom
+   撑出后（见上），mark 必须绝对定位铺满封面再居中 —— 留在流内会按 26px 行高参与
+   0 高度内容盒排版，被挤出封面。 */
+.cover .mark{position:absolute;top:0;left:0;right:0;bottom:0;display:grid;place-items:center;
+  font:700 26px/1 var(--sans);letter-spacing:.1em;color:#fff;text-shadow:0 2px 16px rgba(0,0,0,.55)}
 .cover .plat{position:absolute;left:8px;top:8px;z-index:2;font:700 10px/1 var(--sans);letter-spacing:.08em;
   padding:4px 6px;border-radius:5px;background:rgba(10,10,10,.62);color:#fff}
 /* 安装包格式名牌：封面右上角徽章，按类型配色，一眼区分文件夹/PKG/ffpkg/exFAT/LZ4 */
@@ -1253,7 +1319,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
         <button aria-pressed="false" data-scheme="local" data-root="/mnt/ext1" style="display:none"><svg class="i" style="width:14px;height:14px"><use href="#i-disk"/></svg>M.2 /mnt/ext1</button>
         <button aria-pressed="false" data-scheme="local" data-root="/mnt/usb0" style="display:none"><svg class="i" style="width:14px;height:14px"><use href="#i-disk"/></svg>USB /mnt/usb0</button>
         <button aria-pressed="false" data-scheme="local" data-root="/mnt/usb1" style="display:none"><svg class="i" style="width:14px;height:14px"><use href="#i-disk"/></svg>USB /mnt/usb1</button>
-        <span id="nasBox" class="nasbox"></span><button class="nasadd" data-add-nas="1" title="新增 NAS 地址" data-i18n-attr="title:k0012"><svg class="i" style="width:14px;height:14px"><use href="#i-nas"/></svg>+ NAS</button>
+        <span id="nasBox" class="nasbox"><button class="nasadd" data-add-nas="1" title="新增 NAS 地址" data-i18n-attr="title:k0012"><svg class="i" style="width:14px;height:14px"><use href="#i-nas"/></svg>+ NAS</button></span>
         <button aria-pressed="false" data-cheat-root="1" style="display:none"><svg class="i" style="width:14px;height:14px"><use href="#i-disk"/></svg><span id="cheatRootLabel"><span data-i18n="k0013">金手指</span></span></button>
       </div>
       <!-- 吸顶工具条：路径 + 全部功能按钮。见上面 .fmstick 的注释。
@@ -1771,6 +1837,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
   </div>
 </div>
 
+
 <div class="scrim" id="scrimFetch">
   <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="ft">
     <div class="dlg-h"><h2 id="ft"><span data-i18n="k0221">从 NAS 拉取</span></h2><span class="sp"></span>
@@ -1784,8 +1851,11 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
       </div>
       <div class="fld"><label><span data-i18n="k0225">传输协议</span></label>
         <div class="seg" role="group" aria-label="协议" id="fSchemeSeg" data-i18n-attr="aria-label:k0226">
-          <button aria-pressed="true">SMB</button><button aria-pressed="false">NFS</button>
+          <button aria-pressed="true">SMB</button><button aria-pressed="false">NFS</button><button aria-pressed="false">WebDAV</button>
         </div>
+        <!-- WebDAV 的 TLS 开关：v1.0.8 把原先并列的 WebDAVS 档位收成勾选，
+             只有选中 WebDAV 时才出现。 -->
+        <label class="chk" id="fDavTlsRow" style="display:none;margin-top:8px"><input type="checkbox" id="fDavTls"> <span data-i18n="k0361">HTTPS（WebDAV over TLS，默认端口 443，不校验证书）</span></label>
       </div>
     </div>
     <div class="dlg-f"><button class="btn" id="fc2"><span data-i18n="k0227">取消</span></button><button class="btn pri" id="fgo"><span data-i18n="k0228">开始拉取</span></button></div>
@@ -1857,19 +1927,24 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
     <div class="dlg-b">
       <div class="fld"><label><span data-i18n="k0253">访问方式</span></label>
         <div class="seg" role="group" aria-label="协议" id="nSchemeSeg" data-i18n-attr="aria-label:k0254">
-          <button aria-pressed="true">SMB</button><button aria-pressed="false">NFS</button>
+          <button aria-pressed="true">SMB</button><button aria-pressed="false">NFS</button><button aria-pressed="false">WebDAV</button>
         </div>
       </div>
-      <div class="fld"><label for="nAddr"><span data-i18n="k0255">地址　·　主机/共享名（NFS 为 主机:/导出名；反斜杠写法 192.168.1.10\shared 也认）</span></label>
+      <div class="fld"><label for="nAddr"><span data-i18n="k0255">地址　·　主机/共享名（NFS 为 主机:/导出名；WebDAV 为 主机/路径。反斜杠写法 192.168.1.10\shared 也认）</span></label>
         <input type="text" id="nAddr" placeholder="192.168.1.10/shared" autocomplete="off">
         <!-- 用户会问「NAS 连接必须指定一个文件夹吗，我的 SMB 共享就是根目录怎么办」。
              答案是：共享名（NFS 是导出名）**必须**写，共享名**后面**的文件夹可以完全不写。 -->
-        <div class="svhint" style="margin-top:8px"><span data-i18n="k0256">共享名一定要写（SMB 按共享名建立连接）；</span>
+        <div class="svhint" id="nSmbHint" style="margin-top:8px"><span data-i18n="k0256">共享名一定要写（SMB 按共享名建立连接）；</span>
           <b><span data-i18n="k0257">共享名后面可以不再写文件夹</span></b> <span data-i18n="k0258">—— 填</span> <code><span data-i18n="k0259">主机/共享名</span></code> <span data-i18n="k0260">进去的就是该共享的根目录，
           想更深就继续加</span> <code><span data-i18n="k0261">/子目录</span></code><span data-i18n="k0262">。</span></div>
+        <!-- WebDAV 专属说明：只在选中 WebDAV 时显示，「共享名一定要写」那条同时收起。
+             必须写清「明文 HTTP / 不含 TLS」—— 本插件没编 TLS，用户粘 https:// 会连不上。 -->
+        <div class="svhint" id="nDavHint" style="margin-top:8px;display:none"><span data-i18n="k0360">WebDAV 走明文 HTTP（本插件不含 TLS，https 连不上）。地址里已经写了端口（如 nas:5005/dav）时端口框请留空；用户名/密码用于 Basic 认证，留空即匿名。</span></div>
       </div>
-      <div class="fld"><label for="nPort"><span data-i18n="k0263">端口　·　留空用默认（SMB 445 / NFS 2049）</span></label>
+      <div class="fld"><label for="nPort"><span data-i18n="k0263">端口　·　留空用默认（SMB 445 / NFS 2049 / WebDAV 80）</span></label>
         <input type="number" id="nPort" placeholder="" autocomplete="off" inputmode="numeric">
+        <!-- v1.0.8：WebDAVS 档位收成勾选，只在选中 WebDAV 时显示（nasSyncHints）。 -->
+        <label class="chk" id="nDavTlsRow" style="display:none;margin-top:8px"><input type="checkbox" id="nDavTls"> <span data-i18n="k0361">HTTPS（WebDAV over TLS，默认端口 443，不校验证书）</span></label>
       </div>
       <div class="fld"><label for="nUser"><span data-i18n="k0264">用户名　·　匿名访问留空</span></label>
         <input type="text" id="nUser" autocomplete="off">
@@ -2046,6 +2121,47 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
     <div class="dlg-f"><button class="btn pri" id="resultClose"><span data-i18n="k0312">确定</span></button></div>
   </div>
 </div>
+
+<!-- 视频播放器：scrim 全屏。视频经 /api/download/prepare → /api/download?id=
+     取流（与「下载」按钮同一条服务端通道，不新开协议）。
+     🪤 服务端 /api/download 是任务制流，不认 Range ⇒ <video> 会按 200 全量流处理，
+     表现为「缓冲完才播 / 拖动进度灵不灵看服务端 chunk 节奏」。这是 Phase 2 的已知
+     限制，真机验证后再决定要不要给 /api/download 补 Range（见 CLOUD-DRIVE-PLAN）。
+     亮度走 CSS filter（<video> 无原生亮度属性），音量走元素 volume。 -->
+<div class="scrim" id="scrimPlayer" role="dialog" aria-modal="true" aria-labelledby="playerTitle">
+  <div class="player-box">
+    <div class="player-head">
+      <svg class="i" style="width:15px;height:15px"><use href="#ft-video"/></svg>
+      <b id="playerTitle" class="player-title"></b>
+      <button class="btn sm" id="playerClose" title="✕">✕</button>
+    </div>
+    <div class="player-stage">
+      <video id="playerVideo" playsinline preload="auto"></video>
+      <!-- 音频走同一个播放面板：只换媒体元素，取流通道与视频完全一致。
+           ⚠️ 不要给原生 `controls`：面板底部那条 .player-ctl（播放/时间/
+           进度/音量/亮度）已经覆盖了原生控件的全部功能，两套同屏就是
+           **两个进度条**（真机 2026-10-29 截图反馈）。音频没有画面这一点由
+           中间这枚图标 + 底部时间交代，别再用原生控件去「填满黑舞台」。 -->
+      <audio id="playerAudio" preload="auto" style="display:none;width:80%"></audio>
+      <svg class="player-art" id="playerArt" aria-hidden="true"><use href="#ft-audio"/></svg>
+      <div class="player-err" id="playerErr" hidden></div>
+      <div class="player-loading" id="playerLoading"><span data-i18n="k0322">加载中…</span></div>
+    </div>
+    <div class="player-ctl">
+      <button class="btn sm player-btn" id="playerPlay" title="▶/⏸">▶</button>
+      <span class="player-time" id="playerTime">0:00 / 0:00</span>
+      <input type="range" class="player-seek" id="playerSeek" min="0" max="1000" value="0" aria-label="seek">
+      <label class="player-lbl"><span data-i18n="k0321">音量</span>
+        <input type="range" id="playerVol" min="0" max="100" value="100">
+      </label>
+      <label class="player-lbl"><span data-i18n="k0320">亮度</span>
+        <input type="range" id="playerBright" min="20" max="200" value="100">
+      </label>
+      <button class="btn sm player-btn" id="playerFull" title="⛶">⛶</button>
+    </div>
+  </div>
+</div>
+
 
 <!-- 任务坞：解压 / PKG 安装 / 拉取 / fPKG 复制共用的进度面板，可最小化到角落。
      原先每种操作各弹一个模态框（#scrimInst 等），结果是「装到哪了」只在某一
@@ -2415,7 +2531,11 @@ async function renderSaveMgrList() {
     smBusyRetryList(box);
     return;
   }
-  const saves = (j && j.saves) || [];
+  /* ★ 槽位 0 且大小 0 = 只剩一个空目录（上一轮删除留下的壳）。后端已不再
+     产出这种条目（扫描后顺手清掉目录），这里再挡一道：万一接的是旧版服务端，
+     也不能把空壳画成「1 文件夹」的幽灵卡片。 */
+  const saves = ((j && j.saves) || [])
+    .filter(s => Number(s.slots) > 0 || Number(s.size) > 0);
   if (!saves.length) {
     box.innerHTML = t("js0036", '<div class="snaps"><div class="snap"><span class="tm">空</span><span class="why">没有扫到任何存档（或服务不可用）</span></div></div>');
     return;
@@ -2462,7 +2582,7 @@ async function renderSaveMgrList() {
           /* 后端 installed=false = app.db 无行且 appmeta 目录没了（游戏已卸载，
              只是存档残留）。名字/封面来自本地缓存，明确标出来免得像坏了。 */
           (head.installed === false ? t("js0037", '<span class="save-badge off">已卸载</span>') : '') +
-          '<span class="save-count">' + (head.slots || g.list.length) + t("js0038", ' 文件夹</span>') +
+          '<span class="save-count">' + (head.slots != null ? head.slots : g.list.length) + t("js0038", ' 文件夹</span>') +
         '</div>' +
         '<div class="save-path">' + esc(path) + '</div>' +
         '<div class="save-sub">' +
@@ -2606,7 +2726,7 @@ async function smDeleteGame(gi) {
   let names = g.list.map(s => s.dir_name || "").filter(Boolean);
   /* 游戏级列表只给一个代表性 dir_name；若该游戏不止一个槽位，拉一次槽位清单
      让确认框列出全部，避免用户签字时看不清要删多少。 */
-  if (names.length === 1 && (g.list[0].slots || 1) > 1) {
+  if (names.length === 1 && (g.list[0].slots != null ? g.list[0].slots : 1) > 1) {
     try {
       const lj = await apiPost("/api/save_mgr/list", {});
       const slots = (lj && lj.saves) || [];
@@ -2623,7 +2743,9 @@ async function smDeleteGame(gi) {
   const j = await apiJson("/api/save_mgr/delete",
     { uid: (g.list[0].uid || svUid || ""), title_id: g.tid });
   if (!j || !j.ok) { toast(t("js0062", "删除失败：") + (j && j.error ? j.error : t("js0052", "服务不可用"))); return; }
-  if (j.failed)
+  if (!j.deleted && j.cleaned)
+    toast(t("js0516", "已清理空存档目录（这个游戏已经没有存档）"));
+  else if (j.failed)
     toast(t("js0063", "已删 ") + j.deleted + t("js0064", " 个，另有 ") + j.failed + t("js0065", " 个删不掉（看台账）"));
   else toast(t("js0066", "已删除这个游戏的 ") + j.deleted + t("js0048", " 个存档"));
   renderSaveMgrList();
@@ -3070,8 +3192,7 @@ if (smImpBtn) smImpBtn.addEventListener("click", async () => {
     smImpBtn.disabled = true;
     try {
       smOut("smImpOut", t("js0123", "上传 ZIP 中…"), null);
-      const up = await smZipStreamUpload(f);
-      dockSyntheticClear();
+      const up = await smZipStreamUpload(f);   /* 合成行由它自己清（见函数注释） */
       if (!up || !up.ok) {
         smOut("smImpOut", t("js0124", "导入失败：ZIP 上传失败（") + (up && up.err ? up.err : t("js0125", "网络中断")) + t("js0107", "）"), false);
         return;
@@ -3108,8 +3229,7 @@ if (smImpBtn) smImpBtn.addEventListener("click", async () => {
        只会挡住 PS4 导入 —— 旧版导入面板也从来没有密钥行。 */
     const isZip = await smIsZipFile(f);
     smOut("smImpOut", t("js0131", "上传中…进度见右下任务坞"), null);
-    const up = await smZipStreamUpload(f);
-    dockSyntheticClear();
+    const up = await smZipStreamUpload(f);   /* 合成行由它自己清（见函数注释） */
     if (!up || !up.ok) {
       smOut("smImpOut", t("js0132", "校验失败：上传失败（") + (up && up.err ? up.err : t("js0125", "网络中断")) + t("js0107", "）"), false);
       return;
@@ -3295,18 +3415,27 @@ function uploadFileXhr(file, opt) {
   });
 }
 
-/* ZIP 流式上传（存档导入用）：薄封装，进度进任务坞合成行。 */
-function smZipStreamUpload(file, opt) {
+/* ZIP 流式上传（存档导入用）：薄封装，进度进任务坞合成行。
+   ⚠️ 合成行的**清理由本函数自己负责**（finally），不靠调用点手写 clear。
+   2026-10-29 真机：存档覆盖成功后右下角仍挂着一行「导入 xxx.zip 进行中 100%」，
+   点 ✕ 关掉又自己弹回来。成因就是清合成行是各调用点的「礼仪」而不是这里的
+   责任 —— 任何一条提前 return / 抛异常 / 将来新加的调用点漏写一行，那行假任务
+   就永久残留，而 dockRender 里 busy 只要为真就会把面板重新 dockOpen()。 */
+async function smZipStreamUpload(file, opt) {
   const upDir = (opt && opt.dir) || "/data/Mango/incoming";
   const upName = (opt && opt.name) || file.name;
-  return uploadFileXhr(file, {
-    dir: upDir,
-    name: upName,
-    overwrite: true,
-    progress: (pct, loadedN, extra) => {
-      dockSynthetic(t("js0163", "导入 ") + file.name, fmt(loadedN) + " / " + fmt(file.size) + extra, pct);
-    },
-  });
+  try {
+    return await uploadFileXhr(file, {
+      dir: upDir,
+      name: upName,
+      overwrite: true,
+      progress: (pct, loadedN, extra) => {
+        dockSynthetic(t("js0163", "导入 ") + file.name, fmt(loadedN) + " / " + fmt(file.size) + extra, pct);
+      },
+    });
+  } finally {
+    dockSyntheticClear();
+  }
 }
 
 /* ================= 批量归档导入（一个 ZIP 里多个 sdimg_*） =================
@@ -3520,21 +3649,27 @@ async function smUploadFiles(fileList) {
   const list = Array.from(fileList || []);
   if (!list.length) return;
   const dir = smAbsDir();
-  for (const file of list) {
-    const exists = smCurFiles.some(f => f.name === file.name);
-    let mode = "new";
-    if (exists) {
-      mode = await new Promise(res => askUpConflict(dir, file.name, res));
-      if (mode === "skip") continue;
+  try {
+    for (const file of list) {
+      const exists = smCurFiles.some(f => f.name === file.name);
+      let mode = "new";
+      if (exists) {
+        mode = await new Promise(res => askUpConflict(dir, file.name, res));
+        if (mode === "skip") continue;
+      }
+      const name = (mode === "rename") ? smNextName(file.name) : file.name;
+      const r = await uploadFileXhr(file, {
+        dir, name, overwrite: mode === "overwrite",
+        progress: (pct, loadedN, extra) =>
+          dockSynthetic(t("js0199", "存档上传 ") + name, fmt(loadedN) + " / " + fmt(file.size) + extra, pct)
+      });
+      if (!r.ok) { toast(t("js0200", "上传失败：") + r.err); break; }
+      toast(t("js0201", "已") + (mode === "overwrite" ? t("js0202", "替换") : t("js0203", "上传")) + " " + name);
     }
-    const name = (mode === "rename") ? smNextName(file.name) : file.name;
-    const r = await uploadFileXhr(file, {
-      dir, name, overwrite: mode === "overwrite",
-      progress: (pct, loadedN, extra) =>
-        dockSynthetic(t("js0199", "存档上传 ") + name, fmt(loadedN) + " / " + fmt(file.size) + extra, pct)
-    });
-    if (!r.ok) { toast(t("js0200", "上传失败：") + r.err); break; }
-    toast(t("js0201", "已") + (mode === "overwrite" ? t("js0202", "替换") : t("js0203", "上传")) + " " + name);
+  } finally {
+    /* 与 smZipStreamUpload 同一个道理：合成行不留到循环外面去。这条路径原先
+       一行 clear 都没有 —— 存档页传完文件，右下角会一直挂着一行 100% 的假任务。 */
+    dockSyntheticClear();
   }
   renderSmFiles(smCurPath);
 }
@@ -3738,8 +3873,7 @@ if (advBtnEnc) advBtnEnc.addEventListener("click", async () => {
   advBtnEnc.disabled = true;
   advSetOut(t("js0236", "上传 ZIP 中…进度见任务坞"), null);
   try {
-    const up = await smZipStreamUpload(f);
-    dockSyntheticClear();
+    const up = await smZipStreamUpload(f);   /* 合成行由它自己清（见函数注释） */
     if (!up || !up.ok) {
       advSetOut(t("js0200", "上传失败：") + (up && up.err ? up.err : t("js0125", "网络中断")), false);
       return;
@@ -3789,8 +3923,7 @@ if (advBtnRes) advBtnRes.addEventListener("click", async () => {
       }
       key_path = "/data/Mango/tmp/_nex_key.bin";
     }
-    const up = await smZipStreamUpload(img);
-    dockSyntheticClear();
+    const up = await smZipStreamUpload(img);   /* 合成行由它自己清（见函数注释） */
     if (!up || !up.ok) {
       advSetOut(t("js0246", "镜像上传失败：") + (up && up.err ? up.err : t("js0125", "网络中断")), false);
       return;
@@ -4145,6 +4278,29 @@ const apiJson = (p, data) => fetch(p, {
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(data),
 }).then(r => r.json()).catch(() => null);
+/* 二进制取流（图片预览走这条）：服务端直接吐字节，前端拿 ArrayBuffer 做 Blob。
+ * 为什么不再用 /api/fs/read 的 base64（2026-10-28 真机「图片显示不全」）：
+ * base64 让内存翻 3 倍（原始 + 编码串 + JSON 缓冲），所以服务端只能封 4 MiB
+ * 的 cap，而手机相册单张就 7 MB —— 表现为「已截断」。流式取字节后服务端只
+ * 留一块读缓冲，图片大小不再受限。 */
+async function apiRaw(p, data) {
+  let r;
+  try {
+    r = await fetch(p, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+  } catch (_) { return { ok: false, error: "" }; }
+  if (!r.ok) {
+    let msg = "";
+    try { const j = await r.json(); msg = (j && j.error) || ""; } catch (_) {}
+    return { ok: false, error: msg || ("HTTP " + r.status) };
+  }
+  const mime = r.headers.get("Content-Type") || "application/octet-stream";
+  const buf = await r.arrayBuffer();
+  return { ok: true, mime, size: buf.byteLength, blob: new Blob([buf], { type: mime }) };
+}
 
 /* ---- 服务在线/离线提示（2026-10-07 真机反馈「网页打不开但进程还在，一直转圈」）----
    轮询断连时 ipChip 变红 + 一次性 toast（不弹重复）。断连 ≠ 页面坏 —— 页面会一直停在
@@ -4362,9 +4518,16 @@ function fsNav(cfg) {
       b.setAttribute("aria-pressed", String(on));
     });
   }
+  /* NAS 上「还能不能往上退」：退到 "/" 会把地址里的**主机段**一起丢掉
+   * （192.168.1.3/dav → 192.168.1.3 → "/"），之后 fsFullPath 拼出的
+   * "/game.pkg" 在后端是「没有主机」的坏地址。所以 NAS 停在含主机的那一层。 */
+  function canUp() {
+    return st.path !== "/" &&
+      !(st.scheme !== "local" && parentOf(st.path) === "/");
+  }
   function renderRows(entries) {
     clearRows();
-    if (st.path !== "/") rowHost.insertAdjacentHTML("beforeend", cfg.upRow(st));
+    if (canUp()) rowHost.insertAdjacentHTML("beforeend", cfg.upRow(st));
     entries.forEach(e => rowHost.insertAdjacentHTML("beforeend", cfg.rowOf(e, st)));
     if (!entries.length) rowHost.insertAdjacentHTML("beforeend", cfg.emptyRow(st));
   }
@@ -4399,7 +4562,11 @@ function fsNav(cfg) {
       }
       await refresh();
     },
-    up: async () => { st.path = parentOf(st.path); await refresh(); },
+    up: async () => {
+      if (!canUp()) return;      /* NAS 退到含主机的那一层为止（见 canUp 注释） */
+      st.path = parentOf(st.path);
+      await refresh();
+    },
     refresh,
   };
   panel.addEventListener("click", e => {
@@ -4467,7 +4634,27 @@ let FS_SELECTED = new Set();  // 选中的完整路径集合
 /* 从存档页跳过来时要高亮的那一个文件名（"sdimg_xxx"）。fsView.onOk 消费一次
    就清空 —— 不清的话下一次进任何目录都会莫名高亮一行。 */
 let FS_FOCUS = "";
-let FS_SORT = { key: "name", dir: 1 };
+/* 文件列表排序态。默认「修改时间降序」（新的在前）—— 用户明确要求目录按时间排序；
+   用户点过列头后持久化到 localStorage，刷新/重进不再丢。 */
+const FS_SORT_KEY = "mango.fsSort";
+function fsSortLoad() {
+  try {
+    const j = JSON.parse(localStorage.getItem(FS_SORT_KEY) || "null");
+    if (j && typeof j.key === "string" && typeof j.dir === "number" &&
+        ["name", "size", "type", "mtime", "mode"].includes(j.key))
+      return { key: j.key, dir: j.dir >= 0 ? 1 : -1 };
+  } catch (_) {}
+  return { key: "mtime", dir: -1 };
+}
+let FS_SORT = fsSortLoad();
+/* 表头箭头：FS_SORT 变化后调用，与排序点击处理共用同一套 class 名 */
+function fsSortIndicator() {
+  document.querySelectorAll("#fsPanel th[data-sort]").forEach(th => {
+    th.classList.remove("sort-asc", "sort-desc");
+    if (th.dataset.sort === FS_SORT.key)
+      th.classList.add(FS_SORT.dir > 0 ? "sort-asc" : "sort-desc");
+  });
+}
 let FS_CLIPBOARD = null;   // {op:"copy"|"move", items:[{path,name,is_dir}]}
 
 function fsTypePill(e) {
@@ -4592,7 +4779,7 @@ function fsUpdateToolbar() {
        而粘贴的成败完全取决于这件事。 */
     const srcInfo = FS_CLIPBOARD.src || { scheme: "local" };
     const from = srcInfo.scheme === "local"
-      ? "" : `，来自 ${srcInfo.scheme === "nfs" ? "NFS" : "SMB"} ${srcInfo.addr}`;
+      ? "" : `，来自 ${srcInfo.scheme === "nfs" ? "NFS" : srcInfo.scheme === "webdav" ? "WebDAV" : srcInfo.scheme === "webdavs" ? "WebDAVS" : "SMB"} ${srcInfo.addr}`;
     ci.style.display = "";
     ci.textContent = `剪贴板：${verb} ${FS_CLIPBOARD.items.length} 项（${names}）${from} → 点击「粘贴」放到当前目录`;
   } else {
@@ -4612,17 +4799,11 @@ const fsView = fsNav({
   upRow: () => '<tr data-up="1"><td class="csel"></td>'
     + t("js0302", '<td class="cname"><span class="nm">.. 返回上一级</span></td>')
     + '<td class="csize"></td><td class="ctime"></td><td class="cmode"></td></tr>',
-  rowOf: (e) => {
-    const full = fsFullPath(e.name);
-    const sel = FS_SELECTED.has(full);
-    return '<tr data-' + (e.is_dir ? "dir" : "path") + '="' + esc(full) + '"' + (sel ? ' class="sel"' : "") + '>'
-      + '<td class="csel"><label class="selhit"><input type="checkbox" data-fsck="1" ' + (sel ? "checked" : "") + '></label></td>'
-      + '<td class="cname"><span class="nm"><svg class="ft"><use href="#' + fsTypeIcon(e) + '"/></svg>' + esc(decodeFsText(e.name)) + '</span></td>'
-      + '<td class="csize">' + (e.is_dir ? "—" : fmt(e.size)) + '</td>'
-      + '<td class="ctime">' + fsMtimeStr(e) + '</td>'
-      + '<td class="cmode">' + fsModeStr(e) + '</td>'
-      + '</tr>';
-  },
+  /* ⚠️ 行模板只有 fsViewRow 一份（函数声明提升，这里可以先引用）。
+   * 2026-10-28 真机：当年 rowOf 自己抄了一份且少了 ▶ 播放按钮，于是
+   * 「列表进来没有播放按钮、点一下列头排序后按钮又冒出来」——
+   * mp3/mp4 用户看到的就是「没有播放按钮」。两份模板必然只改一份。 */
+  rowOf: (e) => fsViewRow(e),
   emptyRow: () => t("js0303", '<tr><td colspan="5"><div class="fmempty" style="padding:30px">空目录</div></td></tr>'),
   errRow: msg => '<tr><td colspan="5"><div class="fmempty" style="color:var(--bad)">' + esc(msg) + '</div></td></tr>',
   onOk: (st, entries) => {
@@ -4671,6 +4852,10 @@ const fsView = fsNav({
          想装就点面板里的「安装」，NAS 上的包还会在那之前再确认一次。 */
     if (/\.(txt|log|ini|cfg|conf|sfo|md|csv|yml|yaml|json|xml|html?|sh|js|css|py|c|h|cpp|hpp|lua|bat|ps1)$/i.test(nm)) openTextEditor(path, nm);
     else if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(nm)) openView(path, nm);
+    /* 音视频 → 直接开播放器：与「文本→编辑器、图片→预览、PKG→信息面板」同一条
+       按类型分派的链。2026-10-28 用户报「mp3/mp4 点击没有播放」—— 当年的行模板
+       压根没渲染 ▶，点名字又只切选中态，等于两个入口都没有。 */
+    else if (fsIsVideo(nm) || fsIsAudio(nm)) fsPlayMedia(path, nm);
     else if (PKG_ANY_RE.test(nm)) {
       const title = nm.replace(PKG_ANY_RE, "").trim();
       const ent = FS_ENTRIES.find(x => fsFullPath(x.name) === path);
@@ -4970,10 +5155,19 @@ document.getElementById("jobBarCancel").addEventListener("click", async () => {
 document.getElementById("btnDownload").addEventListener("click", async () => {
   const items = fsSelectedItems().filter(i => !i.is_dir);
   if (!items.length) { toast(t("js0325", "请选中文件（暂不支持目录下载）")); return; }
+  /* NAS 上打包下载（tar）要远端递归遍历，这一版没做：与其让服务端回一句
+     「请单选一个文件」，不如在入口就说清楚。 */
+  const sc = fsScopeFields();
+  if (sc.scheme && items.length > 1) {
+    toast(t("js0514", "NAS 上暂不支持打包下载，请单选一个文件")); return;
+  }
   const btn = document.getElementById("btnDownload");
   if (btn) btn.disabled = true;
+  /* NAS 作用域必须随路带：服务端要拿 scheme/凭据拼共享地址，缺了它就只能
+     对 host/share/x 做本地 lstat ⇒ ENOENT ⇒「下载失败：file not found」。 */
   const j = await apiPost("/api/download/prepare",
-                          { paths: items.map(i => i.path).join("\n") });
+                          Object.assign({ paths: items.map(i => i.path).join("\n") },
+                                        sc));
   if (btn) btn.disabled = false;
   if (!j || !j.ok || !j.task_id) {
     toast(t("js0220", "下载失败：") + ((j && j.error) || t("js0326", "无法创建下载任务")));
@@ -5069,6 +5263,15 @@ document.getElementById("selAll").addEventListener("change", e => {
    由这里自己翻；点在 input 上则不能 preventDefault —— 那会把复选框原生已经翻好的
    状态**撤销**回去（checkbox 的激活行为在 click 派发之前就发生了）。 */
 document.getElementById("fsTbody").addEventListener("click", e => {
+  /* 行内播放按钮优先：它不在 csel 格内，且绝不能顺带触发行选中 */
+  const vp = e.target.closest("[data-vplay]");
+  if (vp) {
+    e.stopPropagation();
+    const tr = vp.closest("tr");
+    const p = tr && (tr.dataset.path || tr.dataset.dir);
+    if (p) fsPlayMedia(p, (tr.querySelector(".nm") || {}).textContent || "");
+    return;
+  }
   const cell = e.target.closest("#fsTbody td.csel");
   if (!cell) return;
   const box = cell.querySelector('input[data-fsck]');
@@ -5093,8 +5296,8 @@ document.querySelectorAll("#fsPanel th[data-sort]").forEach(th => {
   th.addEventListener("click", () => {
     const k = th.dataset.sort;
     if (FS_SORT.key === k) FS_SORT.dir *= -1; else { FS_SORT.key = k; FS_SORT.dir = 1; }
-    document.querySelectorAll("#fsPanel th[data-sort]").forEach(t => t.classList.remove("sort-asc", "sort-desc"));
-    th.classList.add(FS_SORT.dir > 0 ? "sort-asc" : "sort-desc");
+    try { localStorage.setItem(FS_SORT_KEY, JSON.stringify(FS_SORT)); } catch (_) {}
+    fsSortIndicator();
     /* 重新渲染当前条目（fsNav 已缓存，直接重排行） */
     const sorted = fsSortEntries(FS_ENTRIES);
     const tb = document.getElementById("fsTbody");
@@ -5104,24 +5307,206 @@ document.querySelectorAll("#fsPanel th[data-sort]").forEach(th => {
     sorted.forEach(e => tb.insertAdjacentHTML("beforeend", fsViewRow(e)));
   });
 });
+/* 初始箭头：FS_SORT 可能来自 localStorage，表头 class 需与之同步 */
+fsSortIndicator();
 /* 提供给排序重渲染用的行模板（与 fsNav rowOf 一致） */
+/* 视频扩展名判定：与 fsTypeIcon 的视频分支保持一致。WebKit 实测稳播
+   mp4/m4v/webm/mov；mkv/avi/ts 列入但大概率解不动 —— 由播放器 error 层
+   给出「换播放器」的可操作提示，而不是静默黑屏。 */
+function fsIsVideo(name) {
+  return /\.(mp4|m4v|webm|mov|mkv|avi|ts)$/i.test(name || "");
+}
+/* 音频：与 fsTypeIcon 的音频分支同一份扩展名表。
+ * 为什么要单列（2026-10-28）：播放器当年只有 <video>，mp3/flac 在文件列表里
+ * 连 ▶ 都没有 —— 用户说「音频播放坏了」，其实是**从来没有过入口**。取流通道
+ * 与视频完全相同（/api/download/prepare → /api/download?id=），所以这里只是
+ * 多一个 <audio> 元素，不新开协议。 */
+function fsIsAudio(name) {
+  return /\.(mp3|flac|wav|aac|ogg|m4a)$/i.test(name || "");
+}
 function fsViewRow(e) {
   const full = fsFullPath(e.name);
   const sel = FS_SELECTED.has(full);
+  const vplay = (!e.is_dir && (fsIsVideo(e.name) || fsIsAudio(e.name)))
+    ? '<button type="button" class="vplay" data-vplay="1" title="' + (fsIsAudio(e.name) ? t("js0515", "播放音频") : t("k0319", "播放视频")) + '">▶</button>'
+    : "";
   return '<tr data-' + (e.is_dir ? "dir" : "path") + '="' + esc(full) + '"' + (sel ? ' class="sel"' : "") + '>'
     + '<td class="csel"><label class="selhit"><input type="checkbox" data-fsck="1" ' + (sel ? "checked" : "") + '></label></td>'
-    + '<td class="cname"><span class="nm"><svg class="ft"><use href="#' + fsTypeIcon(e) + '"/></svg>' + esc(decodeFsText(e.name)) + '</span></td>'
+    + '<td class="cname"><span class="nm"><svg class="ft"><use href="#' + fsTypeIcon(e) + '"/></svg>' + esc(decodeFsText(e.name)) + '</span>' + vplay + '</td>'
     + '<td class="csize">' + (e.is_dir ? "—" : fmt(e.size)) + '</td>'
     + '<td class="ctime">' + fsMtimeStr(e) + '</td>'
     + '<td class="cmode">' + fsModeStr(e) + '</td>'
     + '</tr>';
 }
 
-/* ---- NAS 书签：localStorage 多地址持久（含 SMB/NFS 凭据）。条目
+/* ── 视频/音频播放器（#scrimPlayer） ───────────────────────────────────────
+   取流通道：GET /api/fs/raw?path=…&scheme=…（与图片预览同一个只读源出口）。
+   ★ 2026-10-29 改：播放**不再**走 /api/download/prepare 的下载任务。原因三条，
+     都是真机反馈直接点出来的：
+       ① 下载任务会在右下角点亮任务坞 —— 用户原话「播放时候右下角的进度条
+          窗口就没必要出现了吧」；
+       ② 下载任务全局只允许一个，播着视频去点下载就是 409；
+       ③ 任务流不认 Range —— 拖进度条等于整份重拉，mp3 起播也慢。
+     /api/fs/raw 现在按 RFC 7233 处理 Range（206 + Content-Range），
+     <video> 的拖动与边下边播都由它支撑。 */
+function plFmtTime(s) {
+  if (!isFinite(s) || s < 0) s = 0;
+  return Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+}
+/* 取流地址：把 path + NAS 作用域拼成 query。
+ * ⚠️ 必须带作用域：只给 path 的话服务端会当成本地路径去 open("host/share/x")，
+ *    也就是「file not found」那个老毛病（fsScopeFields 的注释里记了三次）。 */
+function fsRawUrl(path) {
+  const body = fsReadBody(path);
+  const qs = Object.keys(body)
+    .filter(k => body[k] !== undefined && body[k] !== null && body[k] !== "")
+    .map(k => encodeURIComponent(k) + "=" + encodeURIComponent(body[k]))
+    .join("&");
+  return "/api/fs/raw?" + qs;
+}
+/* 播放出错时回头问服务端「到底哪儿不对」。
+ * <video> 的 error 事件只有一句 MEDIA_ERR_SRC_NOT_SUPPORTED，分不出「格式
+ * 不支持」和「NAS 上根本读不到」。用 1 字节的 Range 再请求一次：失败就把
+ * 服务端 JSON 里的原因原样显示（含 webdav 状态码与路径），成功才判定为格式问题。 */
+let plCurUrl = "";
+async function plProbeError() {
+  if (!plCurUrl) return "";
+  try {
+    const r = await fetch(plCurUrl, { headers: { Range: "bytes=0-1" }, cache: "no-store" });
+    if (r.ok) return "";
+    let j = null;
+    try { j = await r.json(); } catch (e) {}
+    return (j && (j.error || j.message)) || ("HTTP " + r.status);
+  } catch (e) { return ""; }
+}
+/* 当前在播的媒体元素：视频用 <video>，音频用 <audio>。
+ * 两个元素的 JS 接口（play/pause/currentTime/duration/timeupdate/ended/error）
+ * 完全一致，所以下面的控制逻辑不必分叉 —— 只有「谁可见」不一样。 */
+let plMode = "video";
+function plEl() {
+  return document.getElementById(plMode === "audio" ? "playerAudio" : "playerVideo");
+}
+function plStop(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.pause();
+  el.removeAttribute("src");
+  el.load();                     /* 断开流：服务端那条响应自然收尾 */
+}
+function plSyncTime() {
+  const v = plEl();
+  document.getElementById("playerTime").textContent =
+    plFmtTime(v.currentTime) + " / " + plFmtTime(v.duration);
+}
+function plPlayerClose() {
+  /* 两个元素都收：上次播的是音频、这次关窗时只收 video，流就还挂着。 */
+  plStop("playerVideo");
+  plStop("playerAudio");
+  plCurUrl = "";
+  const v = plEl();
+  v.style.filter = "";
+  document.getElementById("playerErr").hidden = true;
+  document.getElementById("playerLoading").style.display = "";
+  const sc0 = document.getElementById("scrimPlayer");
+  sc0.classList.remove("on");
+  sc0.classList.remove("audio");   /* 下次开窗别把音频占位图标带进视频模式 */
+}
+function fsPlayMedia(path, name) {
+  const audio = fsIsAudio(name);
+  plMode = audio ? "audio" : "video";
+  plStop(audio ? "playerVideo" : "playerAudio");
+  const v = plEl();
+  const other = document.getElementById(audio ? "playerVideo" : "playerAudio");
+  if (other) other.style.display = "none";
+  v.style.display = "";
+  v.style.filter = "";
+  /* 音频没有画面：亮度与全屏对它没意义，留着只会让人以为坏了。 */
+  const bright = document.getElementById("playerBright");
+  const full = document.getElementById("playerFull");
+  if (bright) bright.parentElement.style.display = audio ? "none" : "";
+  if (full) full.style.display = audio ? "none" : "";
+  document.getElementById("playerTitle").textContent = name || path;
+  document.getElementById("playerErr").hidden = true;
+  document.getElementById("playerLoading").style.display = "";
+  document.getElementById("playerPlay").textContent = "▶";
+  /* .audio 决定「舞台里显示什么」：音频给占位图标、隐藏亮度/全屏（下面两行），
+     视频给 <video>。用 class 而不是给元素设 hidden —— 见 CSS 里的 [hidden] 坑。 */
+  const sc = document.getElementById("scrimPlayer");
+  sc.classList.toggle("audio", audio);
+  sc.classList.add("on");
+  plCurUrl = fsRawUrl(path);
+  v.src = plCurUrl;
+  v.play().catch(() => {});      /* 自动播放被拦：用户点 ▶ 即可，不报错 */
+  document.getElementById("playerPlay").textContent = "⏸";
+}
+(function plInit() {
+  /* 事件绑到**两个**媒体元素：绑死 playerVideo 的话，音频那个永远收不到
+     timeupdate/ended/error —— 表现为进度条不动、播完不复位。 */
+  ["playerVideo", "playerAudio"].forEach(id => {
+    const v = document.getElementById(id);
+    if (!v) return;
+    v.setAttribute("preload", "metadata");
+    v.addEventListener("loadedmetadata", () => {
+      document.getElementById("playerLoading").style.display = "none";
+      plSyncTime();
+    });
+    v.addEventListener("timeupdate", () => {
+      if (v !== plEl()) return;
+      plSyncTime();
+      if (v.duration)
+        document.getElementById("playerSeek").value =
+          Math.round(v.currentTime / v.duration * 1000);
+    });
+    v.addEventListener("ended", () => { document.getElementById("playerPlay").textContent = "▶"; });
+    v.addEventListener("error", async () => {
+      document.getElementById("playerLoading").style.display = "none";
+      const err = document.getElementById("playerErr");
+      const why = await plProbeError();
+      err.textContent = why
+        ? t("k0324", "准备播放失败：") + why
+        : t("k0323", "无法播放：当前浏览器不支持该视频格式（如 MKV / AVI / TS）。可先下载到本机，再用其他播放器打开。");
+      err.hidden = false;
+    });
+  });
+  document.getElementById("playerPlay").addEventListener("click", () => {
+    const m = plEl();
+    if (m.paused) { m.play().catch(() => {}); document.getElementById("playerPlay").textContent = "⏸"; }
+    else { m.pause(); document.getElementById("playerPlay").textContent = "▶"; }
+  });
+  document.getElementById("playerSeek").addEventListener("input", function () {
+    const m = plEl();
+    if (m.duration) m.currentTime = this.value / 1000 * m.duration;
+  });
+  document.getElementById("playerVol").addEventListener("input", function () {
+    plEl().volume = this.value / 100;
+  });
+  document.getElementById("playerBright").addEventListener("input", function () {
+    plEl().style.filter = "brightness(" + this.value + "%)";
+  });
+  document.getElementById("playerFull").addEventListener("click", () => {
+    const m = plEl();
+    if (document.fullscreenElement) { document.exitFullscreen(); return; }
+    const fn = m.requestFullscreen || m.webkitEnterFullscreen;   /* PS5 WebKit */
+    if (fn) fn.call(m);
+  });
+  document.getElementById("playerClose").addEventListener("click", plPlayerClose);
+})();
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" &&
+      document.getElementById("scrimPlayer").classList.contains("on"))
+    plPlayerClose();
+});
+
+/* ---- NAS 书签：localStorage 多地址持久（含 SMB/NFS/WebDAV(S) 凭据）。条目
    {addr, scheme, port, user, pass}；兼容旧版字符串（默认 smb、无凭据）。
    连接串 主机/共享（无 smb:// 前缀、无前导 /），存浏览器 profile；未配置时播种
-   示例 nas.lan/games。书签始终展示（不随可达性隐藏）。注意：当前 ELF 后端未编入
-   smb/nfs，点击书签会报「NAS backend not compiled in」——本窗口只存配置。 */
+   示例 nas.lan/games。书签始终展示（不随可达性隐藏）。
+   scheme 有四个取值：smb / nfs / webdav / webdavs，但**入口只有三档** ——
+   v1.0.8 起 webdavs 不再单列一个按钮，而是「WebDAV + HTTPS 勾选」合成出来的
+   （nasScheme() / fgo 里各有一处合成）。webdav 的后端是**明文 HTTP +
+   Basic 认证**，webdavs 是它的 TLS 版（自签证书可连，不校验）；地址第一段路径
+   当「共享」用，wd_build_path 再拼回请求路径；所以 nas:5005/dav 与 主机 nas +
+   端口 5005 + 共享 dav 是同一件事。 */
 /* NAS 地址归一化 —— 把用户**实际会打进来**的形状收敛成后端认的形状。
    要换掉的三样东西：
      1. `\` → `/`：Windows 习惯，也含资源管理器「复制路径」给出的
@@ -5157,56 +5542,211 @@ function nasLoad() {
 }
 let NAS_ROOTS = nasLoad();
 function nasSave() { try { localStorage.setItem("mangoNasRoots", JSON.stringify(NAS_ROOTS)); } catch (e) {} }
+/* 书签前缀：协议必须写出来。同一台 NAS 很可能同时开 SMB 和 WebDAV，
+   只显示地址的话两个条目长得一模一样 —— 用户分不清哪个是哪个。 */
+function nasTag(scheme) {
+  return scheme === "nfs" ? "nfs:" : scheme === "webdav" ? "dav:" : scheme === "webdavs" ? "davs:" : "";
+}
+/* 地址短名化（方案 D）：**只对长地址生效**，短地址原样显示 —— 日常只有一两个短
+   书签的用户看不出任何变化，被收回来的只是那个 414px 的怪胎。
+   预算按像素估，不按字符数：12.5px 字号下 ASCII 约 7.3px、CJK 约 12.6px。用 length
+   会把「我的游戏存档」当 6 个字符（实际 101px），于是该缩的不缩。 */
+function nasPx(s) {
+  let w = 0;
+  for (const ch of String(s)) w += ch.codePointAt(0) > 0x2e80 ? 12.6 : 7.3;
+  return w;
+}
+function nasShort(addr, prefix) {
+  const BUDGET = 200 - nasPx(prefix || "");
+  if (nasPx(addr) <= BUDGET) return addr;
+  const p = String(addr).split("/").filter(Boolean);
+  if (p.length < 2) return addr;
+  const host = p[0], tail = p[p.length - 1], sep = "/…/";
+  /* 优先「主机 + 末段」：主机认机器、末段认目录。主机自己就占满预算时退回
+     「…/末段」—— 末段永远保留，它是最像人给文件夹起的名字的那一段。
+     （反面教材：只留开头会截出 davs:192.168.1.1…，两台机器分不清。） */
+  return (BUDGET - nasPx(tail) - nasPx(sep) >= nasPx(host))
+    ? host + sep + tail
+    : "…/" + tail;
+}
+/* 书签折叠（方案 A）：最多两行，第三行起收进「更多 N」，点开就地展开并变「收起」。
+   不做浮层：PS5 上没有 hover，浮层的定位与方向键焦点都会变成两个新问题。 */
+let nasExpanded = false;
+function nasMoreBtn(label, onClick) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "nasmore"; b.textContent = label;
+  b.addEventListener("click", e => { e.stopPropagation(); onClick(); });
+  return b;
+}
+function nasApplyOverflow() {
+  const box = document.getElementById("nasBox");
+  if (!box) return;
+  const add = box.querySelector("button[data-add-nas]");
+  [...box.querySelectorAll("button.nasmore")].forEach(b => b.remove());
+  const chips = [...box.querySelectorAll("button[data-nas-chip]")];
+  chips.forEach(c => { c.hidden = false; });      /* 先全显示再量，否则量到的是 0 */
+  if (chips.length < 2) { nasExpanded = false; return; }
+  if (!box.clientWidth || !chips[0].offsetWidth) return;   /* 视图隐藏时全 0，等 RO */
+
+  /* 行号基准：第一枚书签是第 0 行，往下每 pitch 一行。两行封顶 ⇒ 只允许 0 / 1。
+     ⚠️ 这里**故意不用宽度累加**：要先猜 +NAS 与「更多 N」的 reserve，再叠上
+     --ui(1.25) 与中文字宽，估宽一点就连锁多藏（实测 1100 宽下 8 个书签只剩 4 个
+     可见）。直接读真实布局，一行代码换掉三个估算常数。 */
+  const t0 = chips[0].offsetTop;
+  const pitch = chips[0].offsetHeight + 6;
+  const rowOf = el => (el ? Math.round((el.offsetTop - t0) / pitch) : 0);
+  const LAST_ROW = 1;
+
+  if (nasExpanded) {
+    const btn = nasMoreBtn(t("js0518", "收起"), () => { nasExpanded = false; renderNas(); });
+    box.insertBefore(btn, add || null);
+    /* 展开后其实已经不溢出了（删书签后常见）⇒ 自动收回展开态，别留一个多余的「收起」 */
+    if (rowOf(add || chips[chips.length - 1]) <= LAST_ROW) { btn.remove(); nasExpanded = false; }
+    return;
+  }
+
+  /* 从「全部显示」开始，一次藏一个，直到 +NAS 落回前两行。折叠按钮全程在 DOM 里
+     占位，所以它自己的宽度也不用估。 */
+  const btn = nasMoreBtn(t("js0517", "更多 ") + 0, () => { nasExpanded = true; renderNas(); });
+  box.insertBefore(btn, add || null);
+  let hideFrom = chips.length;
+  while (hideFrom > 1 && rowOf(add || btn) > LAST_ROW) {
+    hideFrom--;
+    chips[hideFrom].hidden = true;
+    btn.textContent = t("js0517", "更多 ") + (chips.length - hideFrom);
+  }
+  if (hideFrom === chips.length) { btn.remove(); return; }   /* 没溢出，按钮不该在 */
+}
 function renderNas() {
   const box = document.getElementById("nasBox");
   if (!box) return;
-  box.innerHTML = "";
+  /* 只清书签，**保留 +NAS** —— 它现在住在 nasBox 内部，跟着书签一起参与折行。
+     用 innerHTML="" 会把它一起清掉，表现为「加了两个书签结果 + 号没了」。 */
+  const add = box.querySelector("button[data-add-nas]");
+  [...box.querySelectorAll("button[data-nas-chip]")].forEach(n => n.remove());
   NAS_ROOTS.forEach(n => {
     const b = document.createElement("button");
     b.type = "button"; b.dataset.scheme = n.scheme; b.dataset.root = n.addr;
     b.dataset.user = n.user || ""; b.dataset.pass = n.pass || "";
     b.dataset.port = n.port || "";
-    const tag = n.scheme === "nfs" ? "nfs:" : "";
+    b.dataset.nasChip = "1";                 /* 折叠只统计书签，不数 +NAS */
+    b.title = nasTag(n.scheme) + n.addr;     /* 短名化之后，悬浮是找回全址的唯一途径 */
     b.innerHTML = '<svg class="i" style="width:14px;height:14px"><use href="#i-nas"/></svg>';
-    b.appendChild(document.createTextNode(tag + n.addr));
-    const x = document.createElement("span"); x.textContent = "×"; x.className = "nax"; x.dataset.delNas = n.addr;
-    x.addEventListener("click", e => { e.stopPropagation(); delNas(n.addr); });
+    const lab = document.createElement("span");
+    lab.className = "nlabel";
+    lab.textContent = nasTag(n.scheme) + nasShort(n.addr, nasTag(n.scheme));
+    b.appendChild(lab);
+    /* HTTPS 开关：添加弹窗里能勾，但**已存在**的书签当年是明文建进来的，
+       要改 TLS 只能删了重加 —— 用户问「webdav 能不能加 https」正是撞在这。
+       这里给 WebDAV 系书签一个就地切换（webdav ⇄ webdavs）。 */
+    if (n.scheme === "webdav" || n.scheme === "webdavs") {
+      const on = n.scheme === "webdavs";
+      const tls = document.createElement("span");
+      tls.className = "nax";
+      tls.textContent = on ? "HTTPS ✓" : "HTTPS";
+      tls.title = t("js0512", "点击切换 HTTPS / 明文 HTTP");
+      tls.style.opacity = on ? "1" : ".5";
+      tls.addEventListener("click", e => {
+        e.stopPropagation();
+        n.scheme = on ? "webdav" : "webdavs";
+        nasSave(); renderNas();
+        toast(t("js0513", "已切换为 ") + (on ? "HTTP" : "HTTPS"));
+      });
+      b.appendChild(tls);
+    }
+    const x = document.createElement("span"); x.textContent = "×"; x.className = "nax";
+    x.dataset.delNas = n.addr; x.dataset.delScheme = n.scheme || "smb";
+    x.addEventListener("click", e => { e.stopPropagation(); delNas(n.addr, n.scheme || "smb"); });
     b.appendChild(x);
-    box.appendChild(b);
+    box.insertBefore(b, add || null);
   });
+  nasApplyOverflow();
 }
-function delNas(addr) {
-  NAS_ROOTS = NAS_ROOTS.filter(n => n.addr !== addr); nasSave(); renderNas(); toast(t("js0341", "已移除 NAS：") + addr);
+function delNas(addr, scheme) {
+  /* 按 (addr, scheme) 两元组删：同一主机的 SMB 与 WebDAV 是两个独立书签，
+     只按地址删会把另一条一起带走（表现为「刚加的 WebDAV 自己不见了」）。 */
+  NAS_ROOTS = NAS_ROOTS.filter(n => !(n.addr === addr && (n.scheme || "smb") === scheme));
+  nasSave(); renderNas();
+  toast(t("js0341", "已移除 NAS：") + nasTag(scheme) + addr);
 }
-/* 添加 NAS 弹窗：SMB/NFS + 端口 + 用户名/密码 */
+/* 添加 NAS 弹窗：SMB / NFS / WebDAV + 端口 + 用户名/密码 */
 const scrimNas = document.getElementById("scrimNas");
-const openNas = () => { if (scrimNas) scrimNas.classList.add("on"); };
+const openNas = () => {
+  /* 每次打开都按当前协议刷一遍说明：上次可能停在 WebDAV，不刷会拿 SMB
+     「共享名一定要写」去解释一个 WebDAV 地址。 */
+  if (scrimNas) { if (typeof nasSyncHints === "function") nasSyncHints(); scrimNas.classList.add("on"); }
+};
 const closeNas = () => { if (scrimNas) scrimNas.classList.remove("on"); };
 document.getElementById("nc").addEventListener("click", closeNas);
 document.getElementById("nc2").addEventListener("click", closeNas);
 if (scrimNas) scrimNas.addEventListener("click", e => { if (e.target === scrimNas) closeNas(); });
-/* 协议段 SMB/NFS 互斥切换：点击同步 aria-pressed，保存按当前选中读 scheme */
+/* 协议段 SMB/NFS/WebDAV 互斥切换：点击同步 aria-pressed，并按协议切换下方的地址
+   说明。两套说法是互斥的 —— SMB/NFS 讲「共享名一定要写」，WebDAV 讲「明文 HTTP 与
+   端口写法」；同时显示会让人以为 WebDAV 也得填共享名。 */
 const nSeg = document.getElementById("nSchemeSeg");
+/* 段上只有三个档（SMB/NFS/WebDAV）；webdavs 不再单列一档，而是「WebDAV + HTTPS
+   勾选」的组合结果 —— 由 nasScheme() 合成。段函数因此只返回三个值之一。 */
+function nasSegScheme() {
+  const pressed = nSeg && nSeg.querySelector('button[aria-pressed="true"]');
+  const s = pressed ? pressed.textContent.trim().toLowerCase() : "smb";
+  return s === "nfs" ? "nfs" : s === "webdav" ? "webdav" : "smb";
+}
+/* 真正存进书签的 scheme：WebDAV 且勾了 HTTPS ⇒ webdavs（后端按 scheme 决定
+   明文/TLS，两种形态仍然是两个独立书签，chip 前缀 dav: / davs: 可区分）。 */
+function nasScheme() {
+  const s = nasSegScheme();
+  if (s !== "webdav") return s;
+  const box = document.getElementById("nDavTls");
+  return box && box.checked ? "webdavs" : "webdav";
+}
+function nasSyncHints() {
+  const dav = nasSegScheme() === "webdav";
+  const smbHint = document.getElementById("nSmbHint");
+  const davHint = document.getElementById("nDavHint");
+  const tlsRow = document.getElementById("nDavTlsRow");
+  if (smbHint) smbHint.style.display = dav ? "none" : "";
+  if (davHint) davHint.style.display = dav ? "" : "none";
+  /* HTTPS 勾选只在 WebDAV 下有意义；切回 SMB/NFS 必须收起，否则用户会以为
+     SMB 也能开 TLS，而后端对 smb+tls 根本不认。 */
+  if (tlsRow) tlsRow.style.display = dav ? "" : "none";
+}
 if (nSeg) nSeg.addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   nSeg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  nasSyncHints();
 });
 document.getElementById("ngo").addEventListener("click", () => {
   const addr = normalizeNasAddr(document.getElementById("nAddr").value);
-  const seg = document.getElementById("nSchemeSeg");
-  const pressed = seg && seg.querySelector('button[aria-pressed="true"]');
-  const scheme = (pressed && /^nfs$/i.test(pressed.textContent.trim())) ? "nfs" : "smb";
+  const scheme = nasScheme();
   const port = document.getElementById("nPort").value.trim();
   const user = document.getElementById("nUser").value.trim();
   const pass = document.getElementById("nPass").value;
   if (!addr) { toast(t("js0342", "地址不能为空")); return; }
-  if (NAS_ROOTS.some(n => n.addr === addr)) { toast(t("js0343", "该 NAS 已存在")); return; }
+  /* 地址里已写 :端口 时端口框必须留空。后端拿到 "host:5005:5005/dav" 只会回一句
+     bad path，用户看不出是哪两处重复了 —— 在入口把它拦下并说清怎么改。 */
+  if (port && /:\d+(\/|$)/.test(addr)) {
+    toast(t("js0510", "地址里已经带了端口，请把端口框留空")); return;
+  }
+  if (NAS_ROOTS.some(n => n.addr === addr && (n.scheme || "smb") === scheme)) {
+    toast(t("js0343", "该 NAS 已存在")); return;
+  }
   if (addr.length > 200) { toast(t("js0344", "地址过长")); return; }
   NAS_ROOTS.push({ addr, scheme, port, user, pass });
   nasSave(); renderNas(); closeNas();
-  toast(t("js0345", "已添加 NAS：") + (scheme === "nfs" ? "nfs:" : "") + addr);
+  toast(t("js0345", "已添加 NAS：") + nasTag(scheme) + addr);
 });
 renderNas();
+/* 视图从 display:none 切回来时尺寸由 0 变正，折行结果必须重算 —— 否则「在别的视图
+   加载页面、再切到文件视图」会停留在「量不到宽度」的状态，书签全展开 = 溢出裁切的
+   老问题原样回来。RO 比 resize 更准：它连视图切换也覆盖。 */
+if (window.ResizeObserver) {
+  let nasRaf = 0;
+  new ResizeObserver(() => {
+    if (nasRaf) return;
+    nasRaf = requestAnimationFrame(() => { nasRaf = 0; nasApplyOverflow(); });
+  }).observe(document.getElementById("view-files"));
+}
+window.addEventListener("resize", () => { nasApplyOverflow(); });
 
 /* 吸顶工具条的偏移量：--topH 必须是**实测**的顶栏高度。
    顶栏不是常量高度 —— 它随 --ui 缩放，也会在窗口窄于 1030px 时折成两行
@@ -5259,7 +5799,7 @@ if (__rbar) __rbar.addEventListener("click", e => {
 (async function probeRoots() {
   if (!LIVE) return;
   const btns = [...document.querySelectorAll(
-    "#fsRoots button[data-root], #dlgRoots button[data-root]")];
+    "#fsRoots button[data-root], #dlgRoots button[data-root], #dlRoots button[data-root]")];
   for (const b of btns) {
     if (b.dataset.root === "/data") continue;
     const j = await apiJson("/api/fs/list", { scheme: b.dataset.scheme, path: b.dataset.root });
@@ -5320,6 +5860,7 @@ document.getElementById("dlgCrumbs").addEventListener("click", e => {
   if (b) dlgFs.go(b.dataset.path);
   else if (e.target.closest("button[aria-label='返回']")) dlgFs.up();
 });
+
 
 let currentArchive = null;
 /* 打开解压对话框：标题 + 落点直接定位到压缩包所在目录（用户要求「点解压
@@ -5746,6 +6287,11 @@ function dockScheduleIdleClose() {
 function dockClose() {
   dockClearIdle();
   dockIdleShown = true;        /* 手动关后本空闲期不再自动弹回 */
+  /* 手动关闭 = 用户明确表示「这条别再贴我脸上」。合成行是浏览器端的假任务
+     （上传走 XHR，服务端没有对应任务），不跟着一起清的话，下一帧 dockRender
+     会因为 busy = 活跃任务 || !!dockSynth 又把它 dockOpen() 回来 ——
+     真机 2026-10-29 原话「关掉也还出来」。所以关面板必须连它一并丢弃。 */
+  dockSynth = null;
   if (taskDock) taskDock.hidden = true;
 }
 function dockToggle() {
@@ -5813,7 +6359,9 @@ function dockRow(task) {
     + '<span class="pill ' + st[1] + '">' + st[0] + "</span>"
     + '<span class="dock-nm">' + esc(task.label) + "</span>"
     + '<span class="m">' + dockWord(task) + "</span>"
-    + (active ? '<button class="btn sm" data-cancel="' + task.id + '">取消</button>' : "")
+    /* 取消按钮只给**真实**任务（id 由服务端分配，从 1 起）。合成行的 id 是 -1，
+       点「取消」只会 POST /api/task/cancel 拿到 404 —— 一个假任务不该长出真按钮。 */
+    + (active && task.id > 0 ? '<button class="btn sm" data-cancel="' + task.id + '">取消</button>' : "")
     + "</div>"
     + '<div class="track sm' + (active ? " pulse" : "") + '"><i style="width:' + dockPct(task) + '%"></i></div>'
     + dockMeta(task)
@@ -5822,6 +6370,13 @@ function dockRow(task) {
 }
 function dockRender(tasks) {
   if (!taskDock) return;
+  /* 合成行自愈：进度回调是它唯一的心跳（uploadFileXhr 里有 1s tick 兜着，
+     上传期间每秒至少刷一帧）。超过 60 秒没有任何刷新，说明那条上传早已结束
+     却没人来收尾（XHR 的 onload 在 WebKit 上丢帧是踩过的坑）—— 与其把一行
+     100% 的「进行中」永远钉在屏幕上，不如自己过期。
+     ⚠️ 这条兜底不能省：只要 dockSynth 非空，面板每帧都会被 dockOpen()，
+     用户怎么点 ✕ 都会弹回来。 */
+  if (dockSynth && Date.now() - (dockSynth.ts || 0) > 60000) dockSynth = null;
   lastTasks = tasks || [];
   const rows = lastTasks.slice().reverse().slice(0, 6).map(dockRow).join("");
   /* 上传走的是浏览器自己的 XHR，服务端没有对应任务；不给它一行的话，从 PC 选完
@@ -5858,7 +6413,8 @@ function dockRender(tasks) {
   }
 }
 function dockSynthetic(label, sub, pct) {
-  dockSynth = { label, sub, pct };
+  /* ts 是「心跳」：dockRender 靠它判断这行是不是早已没人管了（见上面的自愈）。 */
+  dockSynth = { label, sub, pct, ts: Date.now() };
   dockRender(lastTasks);
 }
 function dockSyntheticClear() { dockSynth = null; dockRender(lastTasks); }
@@ -5937,7 +6493,7 @@ async function installPkgFromFiles(path, name, st) {
     const ent = FS_ENTRIES.find(x => fsFullPath(x.name) === path);
     const sz = Number(ent && ent.size) || 0;
     const okStart = confirm(t("js0383", "「") + name + t("js0384", "」在 NAS（")
-      + (st.scheme === "nfs" ? "NFS" : "SMB") + t("js0385", "）上。\n\n")
+      + (st.scheme === "nfs" ? "NFS" : st.scheme === "webdav" ? "WebDAV" : st.scheme === "webdavs" ? "WebDAVS" : "SMB") + t("js0385", "）上。\n\n")
       + t("js0386", "大小：") + (sz ? fmt(sz) : t("js0387", "未知")) + "\n\n"
       + t("js0388", "将直接从 NAS 流式安装，不再复制到 PS5 本地；")
       + t("js0389", "安装耗时取决于 NAS 读取速度。\n\n开始安装？"));
@@ -6458,7 +7014,21 @@ document.addEventListener("keydown", e => {
 
 /* ---- 从 NAS 拉取：最小对话框 → /api/fetch ---- */
 const scrimFetch = document.getElementById("scrimFetch");
-const openFetch = () => scrimFetch.classList.add("on");
+/* 拉取框的协议段同样是三档；HTTPS 勾选只在 WebDAV 下出现，与 NAS 框同一套口径
+   （nasSyncHints）。打开时先刷一次，避免上次停在 WebDAV 的勾选残留到这次 SMB。 */
+const fSeg = document.getElementById("fSchemeSeg");
+function fSyncHints() {
+  const pressed = fSeg && fSeg.querySelector('button[aria-pressed="true"]');
+  const s = pressed ? pressed.textContent.trim().toLowerCase() : "smb";
+  const row = document.getElementById("fDavTlsRow");
+  if (row) row.style.display = s === "webdav" ? "" : "none";
+}
+if (fSeg) fSeg.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  fSeg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  fSyncHints();
+});
+const openFetch = () => { if (typeof fSyncHints === "function") fSyncHints(); scrimFetch.classList.add("on"); };
 const closeFetch = () => scrimFetch.classList.remove("on");
 document.getElementById("btnFetch")?.addEventListener("click", () => { if (LIVE) openFetch(); });
 document.getElementById("fc").addEventListener("click", closeFetch);
@@ -6473,7 +7043,11 @@ document.getElementById("fgo").addEventListener("click", async () => {
   if (!src || !dst) { toast(t("js0457", "源路径与目标目录都要填")); return; }
   const seg = document.getElementById("fSchemeSeg");
   const pressed = seg && seg.querySelector('button[aria-pressed="true"]');
-  const scheme = (pressed ? pressed.textContent.trim().toLowerCase() : "smb");
+  const raw = (pressed ? pressed.textContent.trim().toLowerCase() : "smb");
+  /* 与 NAS 书签同一套口径：WebDAV + HTTPS 勾选 ⇒ webdavs。 */
+  const fTls = document.getElementById("fDavTls");
+  const scheme = raw === "webdav" && fTls && fTls.checked ? "webdavs"
+               : (raw === "nfs" ? "nfs" : raw === "webdav" ? "webdav" : "smb");
   const btn = document.getElementById("fgo");
   if (btn) btn.disabled = true;
   const j = await apiPost("/api/fetch", { src, dst, scheme });
@@ -6900,6 +7474,30 @@ const vEdit = document.getElementById("vEdit");
 let vCurPath = "";
 let vCurText = "";
 const TEXT_EXTS_RE = /\.(txt|log|ini|cfg|conf|sfo|md|csv|yml|yaml|json|xml|html?|sh|js|css|py|c|h|cpp|hpp|lua|bat|ps1)$/i;
+/* /api/fs/read 的请求体：本地只给 path；NAS 作用域必须把 scheme/凭据一起带
+   上 —— 后端只有这些字段才拼得出共享地址（凭据从不拼进 path，跟 /api/fs/list
+   同一口径）。少了它们，NAS 上的图片/文本就是「列得出来、点开报 file not
+   found」：服务端拿 host/share/path 去 fopen 了一个不存在的本地路径。 */
+/* NAS 作用域字段（scheme/user/pass/port）：fs/read、fs/raw、download/prepare
+   三处都要带，所以抽成一份 —— 少带一处就是「列得出来、点开失败」。 */
+function fsScopeFields() {
+  const st = (typeof fsView !== "undefined" && fsView && fsView.state) ? fsView.state : null;
+  const b = {};
+  if (st && st.scheme && st.scheme !== "local") {
+    b.scheme = st.scheme;
+    if (st.user) b.user = st.user;
+    if (st.pass) b.pass = st.pass;
+    if (st.port) b.port = st.port;
+  }
+  return b;
+}
+function fsReadBody(path) {
+  return Object.assign({ path }, fsScopeFields());
+}
+/* 图片判定：走 /api/fs/raw 之前拿不到 mime（服务端按扩展名给），所以前端按
+   同一份扩展名表先分一次流。与 mime_for_path 的 image/* 集合保持一致。 */
+const IMG_EXT_RE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+let vBlobUrl = "";
 async function openView(path, name) {
   if (!LIVE) { toast(t("js0478", "真机下可预览文本与图片")); return; }
   vCurPath = path;
@@ -6909,30 +7507,46 @@ async function openView(path, name) {
   if (scrimView) scrimView.classList.add("on");
   if (vMeta) vMeta.textContent = name;
   if (vBody) vBody.innerHTML = t("js0479", '<span class="m">读取中…</span>');
-  const j = await apiJson("/api/fs/read", { path });
+  if (IMG_EXT_RE.test(name || path)) {
+    const r = await apiRaw("/api/fs/raw", fsReadBody(path));
+    if (!r.ok) {
+      if (vBody) vBody.innerHTML = '<span style="color:var(--bad)">' + esc(r.error || t("js0480", "读取失败")) + "</span>";
+      return;
+    }
+    if (vBlobUrl) { URL.revokeObjectURL(vBlobUrl); vBlobUrl = ""; }
+    vBlobUrl = URL.createObjectURL(r.blob);
+    /* max-height 必须有：不封顶的话大图会超出 .dlg 的 88vh 上限，
+       于是整窗又冒出滚动条 —— 那正是上次要修的现象。 */
+    if (vBody) vBody.innerHTML = '<img src="' + vBlobUrl + t("js0481", '" style="max-width:100%;max-height:60vh;display:block;margin:0 auto" alt="预览">');
+    if (vMeta) vMeta.textContent = name + "（" + fmt(r.size) + "）";
+    return;
+  }
+  const j = await apiJson("/api/fs/read", fsReadBody(path));
   if (!j || !j.ok) {
     if (vBody) vBody.innerHTML = '<span style="color:var(--bad)">' + esc((j && j.error) || t("js0480", "读取失败")) + "</span>";
     return;
   }
-  let html = "";
-  const isImage = (j.mime || "").startsWith("image/");
-  if (isImage) {
-    /* max-height 必须有：不封顶的话大图会超出 .dlg 的 88vh 上限，
-       于是整窗又冒出滚动条 —— 那正是这次要修的现象。 */
-    html = '<img src="data:' + esc(j.mime) + ";base64," + j.data + t("js0481", '" style="max-width:100%;max-height:60vh;display:block;margin:0 auto" alt="预览">');
-  } else {
+  {
     const bin = atob(j.data || "");
     const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
     const text = new TextDecoder("utf-8").decode(bytes);
     vCurText = text;
-    html = esc(text);
+    if (vBody) vBody.innerHTML = esc(text);
     if (vCopy) vCopy.style.display = "";
     if (vEdit && TEXT_EXTS_RE.test(name || "")) vEdit.style.display = "";
   }
-  if (vBody) vBody.innerHTML = html;
-  if (j.truncated && vMeta) vMeta.textContent = name + t("js0482", "（已截断，仅显示前 ") + fmt(j.size) + t("js0107", "）");
+  /* 截断提示必须同时给两个数：早年只发文件总大小，于是「一共 7.1 MB」被当成
+     「显示了前 7.1 MB」，而实际只取了 4 MiB —— 用户据此判断不出截了多少。 */
+  if (j.truncated && vMeta) {
+    vMeta.textContent = name + t("js0482", "（已截断，仅显示前 ") + fmt(j.size)
+      + t("js0511", "，共 ") + fmt(j.total || j.size) + t("js0107", "）");
+  }
 }
-const closeView = () => scrimView && scrimView.classList.remove("on");
+const closeView = () => {
+  /* Blob URL 不回收的话每预览一张大图就留一份在内存里。 */
+  if (vBlobUrl) { URL.revokeObjectURL(vBlobUrl); vBlobUrl = ""; }
+  scrimView && scrimView.classList.remove("on");
+};
 if (document.getElementById("vc")) document.getElementById("vc").addEventListener("click", closeView);
 if (document.getElementById("vc2")) document.getElementById("vc2").addEventListener("click", closeView);
 if (vCopy) vCopy.addEventListener("click", () => copyText(vCurText));
@@ -6956,7 +7570,7 @@ async function openTextEditor(path, name) {
   if (tPath) tPath.textContent = path;
   if (tArea) { tArea.value = t("js0484", "读取中…"); tArea.disabled = true; }
   scrimText?.classList.add("on");
-  const j = await apiJson("/api/fs/read", { path });
+  const j = await apiJson("/api/fs/read", fsReadBody(path));
   if (tArea) tArea.disabled = false;
   if (!j || !j.ok) { if (tArea) tArea.value = ""; toast(t("js0485", "读取失败：") + (j && j.error ? j.error : t("js0052", "服务不可用"))); return; }
   if (j.truncated) toast(t("js0486", "文件较大，仅编辑前 ") + fmt(j.size) + t("js0487", " 部分"));
@@ -6993,7 +7607,7 @@ document.getElementById("tSave")?.addEventListener("click", async () => {
       t("js0490", "点「确定」= 以我的版本强制覆盖当前内容；\n") +
       t("js0491", "点「取消」= 放弃我的修改，重新加载最新内容。"));
     if (overwrite) {
-      const r = await apiJson("/api/fs/read", { path: tCurPath });
+      const r = await apiJson("/api/fs/read", fsReadBody(tCurPath));
       if (r && r.ok) {
         tCurVersion = r.version || "";   /* 拿最新版本令牌，再以本地内容原子覆盖 */
         const j2 = await apiJson("/api/text/save",
