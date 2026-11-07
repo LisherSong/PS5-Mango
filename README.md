@@ -67,9 +67,11 @@
 
 - 扫描存储中的包体，以带封面的游戏库形式展示（封面取自包体自身的 `sce_sys/icon0.png`）。
 - 无需安装即可读取包体元数据（标题、标题 ID、版本、大小）。
-- **fPKG / 已解密的文件夹**：这类没有索尼的安装入口，因此"安装"意味着把它们复制到 `/data/homebrew`，由挂载文件夹类 payload 接管。
+- **fPKG / 已解密的文件夹**（`.exfat`/`.ffpkg`/`.lz4`）：这类没有索尼的安装入口，因此"安装"意味着把它们复制到 `/data/homebrew`，由 **`shadowmountplus` 插件**扫描并加载成可玩游戏（挂载不是本插件自己做的）。
 - 常规 `.pkg` 文件交给系统安装器，它同时接受本地路径与 `http://` URL 作为包体 URI。
 - **从 PC 经局域网直接安装**（`PKG管理 → 从 PC 安装`）：在放有 `.pkg` 文件的文件夹里运行 `tools/serve-pkg.py`，在主机 UI 中输入 PC 地址，再从卡片列表里选择。系统安装器自行下载文件（Range 请求）——包体从不落盘到主机。PC 端服务是一个零依赖的 Python 脚本（改编自 Loopayeh/pkg-sender 的 `serve_pkg.py`，MIT）。不想装 Python 的 Windows 用户可直接从 [GitHub Release](https://github.com/LisherSong/PS5-Mango/releases/latest) 下载 `serve-pkg.exe`（双击即服务当前目录）；插件网页里「从 PC 安装」弹窗底部也有同样的下载入口。
+
+> **PKG 页"看到什么"**：本插件的 PKG 页只扫描 app 根（`/user/app`、`/mnt/ext1/user/app`、`/data/app`），**不扫描** `/data/homebrew`。把 fPKG（`.exfat` 等）直接丢进 `/data/homebrew` 后，需等 `shadowmountplus` 插件把它加载成 `/user/app/<TID>`，PKG 页才会列出它（格式标签 `exfat` 由 `app_dir_format()` 回 homebrew 找同名镜像补上）。标准「安装」流程（放 `/data/pkg` → 点安装 → 复制到 homebrew → `shadowmountplus` 加载）与"直接丢 homebrew"最终等价，都靠挂成 `/user/app` 才被 PKG 页看见。**不要在本插件里加挂载逻辑——那是 `shadowmountplus` 的职责。**
 
 ### 存档
 
